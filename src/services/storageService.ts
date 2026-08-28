@@ -223,6 +223,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
   },
 ];
 
+const RAW_API_URL = (import.meta.env.VITE_API_URL as string | undefined) || '';
+export const API_BASE_URL = RAW_API_URL.trim().replace(/\/+$/, '');
+
 type ListenerCallback = () => void;
 
 class StorageService {
@@ -291,7 +294,7 @@ class StorageService {
   private async fetchRemoteData() {
     try {
       // 1. Fetch Documents
-      const docRes = await fetch('/api/documents');
+      const docRes = await fetch(`${API_BASE_URL}/api/documents`);
       if (docRes.ok) {
         const remoteDocs: any[] = await docRes.json();
         const normalizedDocs: DocumentItem[] = remoteDocs.map((d) => ({
@@ -308,7 +311,7 @@ class StorageService {
       }
 
       // 2. Fetch Departments
-      const deptRes = await fetch('/api/departments');
+      const deptRes = await fetch(`${API_BASE_URL}/api/departments`);
       if (deptRes.ok) {
         const remoteDepts: Department[] = await deptRes.json();
         if (remoteDepts.length > 0) {
@@ -318,7 +321,7 @@ class StorageService {
       }
 
       // 3. Fetch Accounts
-      const accRes = await fetch('/api/accounts');
+      const accRes = await fetch(`${API_BASE_URL}/api/accounts`);
       if (accRes.ok) {
         const remoteAccs: UserAccount[] = await accRes.json();
         if (remoteAccs.length > 0) {
@@ -508,7 +511,7 @@ class StorageService {
     this.notify();
 
     // 2. Persist to PostgreSQL via REST API
-    fetch('/api/documents', {
+    fetch(`${API_BASE_URL}/api/documents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newDoc),
@@ -567,7 +570,7 @@ class StorageService {
     this.notify();
 
     // Persist status to PostgreSQL API
-    fetch(`/api/documents/${encodeURIComponent(docId)}/status`, {
+    fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -607,7 +610,7 @@ class StorageService {
     this.notify();
 
     // Persist comment to PostgreSQL API
-    fetch(`/api/documents/${encodeURIComponent(docId)}/comments`, {
+    fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -630,7 +633,7 @@ class StorageService {
     this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    fetch(`/api/documents/${encodeURIComponent(docId)}`, {
+    fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}`, {
       method: 'DELETE',
     })
       .then(() => this.fetchRemoteData())

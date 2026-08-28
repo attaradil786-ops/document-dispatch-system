@@ -11,6 +11,9 @@ interface MainLayoutProps {
   children: React.ReactNode;
 }
 
+const RAW_API_URL = (import.meta.env.VITE_API_URL as string | undefined) || '';
+export const API_BASE_URL = RAW_API_URL.trim().replace(/\/+$/, '');
+
 export const MainLayout: React.FC<MainLayoutProps> = ({
   activeTab,
   setActiveTab,
@@ -24,19 +27,70 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   });
 
   useEffect(() => {
-    fetch('/api/db-status')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && data.connected) {
-          setDbStatus({ connected: true, database: data.database || 'dispatch_db' });
+    let isMounted = true;
+
+    const checkDatabaseHealth = async () => {
+      const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/health` : '/api/health';
+      try {
+        const res = await fetch(endpoint, {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            if (data && (data.status === 'connected' || data.connected === true || data.ok === true || data.status === 'ok')) {
+              setDbStatus({
+                connected: true,
+                database: data.database || 'dispatch_db',
+              });
+            } else {
+              setDbStatus({ connected: false });
+            }
+          }
         } else {
+          // Fallback probe
+          const fallbackEndpoint = API_BASE_URL ? `${API_BASE_URL}/api/db-status` : '/api/db-status';
+          const fallbackRes = await fetch(fallbackEndpoint, { cache: 'no-store' });
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            if (isMounted && (fallbackData?.status === 'connected' || fallbackData?.connected)) {
+              setDbStatus({ connected: true, database: fallbackData.database || 'dispatch_db' });
+              return;
+            }
+          }
+          if (isMounted) setDbStatus({ connected: false });
+        }
+      } catch (err) {
+        // Fallback retry with relative endpoint if cross-origin failed
+        try {
+          const fallbackRes = await fetch('/api/health', { cache: 'no-store' });
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            if (isMounted && (fallbackData.status === 'connected' || fallbackData.connected || fallbackData.ok)) {
+              setDbStatus({ connected: true, database: fallbackData.database || 'dispatch_db' });
+              return;
+            }
+          }
+        } catch {
+          // Both failed
+        }
+        if (isMounted) {
           setDbStatus({ connected: false });
         }
-      })
-      .catch(() => {
-        // Fallback gracefully
-        setDbStatus({ connected: true, database: 'dispatch_db' });
-      });
+      }
+    };
+
+    // Initial check immediately
+    checkDatabaseHealth();
+
+    // Regular polling every 5 seconds
+    const interval = setInterval(checkDatabaseHealth, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   return (

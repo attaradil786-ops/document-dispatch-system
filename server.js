@@ -15,8 +15,26 @@ const __dirname = path.dirname(__filename);
 const distPath = path.join(__dirname, 'dist');
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// CORS Configuration for local, Vercel, Cloudflare tunnels, and external origins
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+  res.header('Access-Control-Expose-Headers', 'Content-Length, Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'Pragma'],
+  credentials: false,
+}));
+app.options('*', cors());
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -118,9 +136,29 @@ initDatabase();
 // API ROUTES
 // ==========================================
 
-// Health Check
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, status: 'ok', service: 'inter-department-document-dispatch-system' });
+// Health Check (Probes live PostgreSQL connection)
+app.get('/api/health', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW() as current_time, current_database(), current_user, version()');
+    res.status(200).json({
+      status: 'connected',
+      connected: true,
+      ok: true,
+      database: result.rows[0]?.current_database || 'dispatch_db',
+      user: result.rows[0]?.current_user || 'postgres',
+      serverTime: result.rows[0]?.current_time,
+      version: result.rows[0]?.version,
+      service: 'inter-department-document-dispatch-system',
+    });
+  } catch (err) {
+    res.status(200).json({
+      status: 'disconnected',
+      connected: false,
+      ok: false,
+      error: err.message,
+      service: 'inter-department-document-dispatch-system',
+    });
+  }
 });
 
 // Database Status
@@ -136,7 +174,7 @@ app.get('/api/db-status', async (_req, res) => {
       version: result.rows[0].version,
     });
   } catch (err) {
-    res.status(500).json({
+    res.status(200).json({
       ok: false,
       connected: false,
       error: err.message,
