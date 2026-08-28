@@ -1,0 +1,6 @@
+{
+  "name": "Inter-Department Document Dispatch System",
+  "description": "Multi-Department Document Dispatch & Governance System with strict main department routing, sub-department isolation, authentication, and security audit tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

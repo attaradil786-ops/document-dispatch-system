@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "departments": {
+      "title": "Department",
+      "description": "NAAC Criteria and Main HQ Departments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "is_main": { "type": "boolean" },
+        "email": { "type": "string", "format": "email" },
+        "head_officer": { "type": "string" },
+        "building": { "type": "string" },
+        "phone": { "type": "string" },
+        "created_at": { "type": "string" },
+        "sub_criteria_list": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "code", "name", "is_main", "email"]
+    },
+    "accounts": {
+      "title": "UserAccount",
+      "description": "User accounts for department officers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "password": { "type": "string" },
+        "full_name": { "type": "string" },
+        "role": { "type": "string", "enum": ["main_department", "department_user"] },
+        "department_id": { "type": "string" },
+        "department_name": { "type": "string" },
+        "is_main_dept": { "type": "boolean" },
+        "role_title": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "email", "role", "department_id", "department_name"]
+    },
+    "documents": {
+      "title": "DocumentItem",
+      "description": "Dispatched accreditation and official documents",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "doc_number": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "priority": { "type": "string" },
+        "sub_criteria": { "type": "string" },
+        "is_personal_hq_dispatch": { "type": "boolean" },
+        "personal_dispatch_note": { "type": "string" },
+        "sender_dept_id": { "type": "string" },
+        "sender_dept_name": { "type": "string" },
+        "sender_user_id": { "type": "string" },
+        "sender_user_name": { "type": "string" },
+        "recipient_dept_ids": { "type": "array", "items": { "type": "string" } },
+        "recipient_dept_names": { "type": "array", "items": { "type": "string" } },
+        "is_sent_to_all": { "type": "boolean" },
+        "file_name": { "type": "string" },
+        "file_size": { "type": "string" },
+        "file_type": { "type": "string" },
+        "file_data_url": { "type": "string" },
+        "status": { "type": "string" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" },
+        "comments": { "type": "array" },
+        "history": { "type": "array" }
+      },
+      "required": ["id", "doc_number", "title", "sender_dept_id", "status", "created_at"]
+    },
+    "audit_logs": {
+      "title": "AuditLog",
+      "description": "Institutional governance audit trail",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "performed_by": { "type": "string" },
+        "department_id": { "type": "string" },
+        "department_name": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/departments/{deptId}": {
+      "schema": "departments",
+      "description": "Registered departments directory"
+    },
+    "/accounts/{accountId}": {
+      "schema": "accounts",
+      "description": "Department user accounts"
+    },
+    "/documents/{docId}": {
+      "schema": "documents",
+      "description": "Dispatched document records"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "audit_logs",
+      "description": "Institutional governance audit trail"
+    }
+  }
+}
