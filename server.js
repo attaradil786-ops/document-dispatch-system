@@ -90,60 +90,52 @@ export const pool = new Pool(poolConfig);
 // Helper function to normalize document rows for frontend consumption
 function normalizeDocumentRow(row) {
   if (!row) return null;
-  const docId = row.doc_id || String(row.id);
-  const docNumber = row.doc_number || row.reference_number || `DOC-2026-${String(row.id).padStart(3, '0')}`;
+  const docId = String(row.id);
+  const docNumber = row.reference_number || `DOC-2026-${String(row.id).padStart(3, '0')}`;
   
-  let recipientDeptIds = [];
-  try {
-    recipientDeptIds = typeof row.recipient_dept_ids === 'string' ? JSON.parse(row.recipient_dept_ids) : (row.recipient_dept_ids || []);
-  } catch {
-    recipientDeptIds = row.recipient_department ? [row.recipient_department] : ['main-dept'];
-  }
-
-  let recipientDeptNames = [];
-  try {
-    recipientDeptNames = typeof row.recipient_dept_names === 'string' ? JSON.parse(row.recipient_dept_names) : (row.recipient_dept_names || []);
-  } catch {
-    recipientDeptNames = row.recipient_department ? [row.recipient_department] : ['Main Department (Central HQ & Registry)'];
-  }
-
-  let comments = [];
-  try {
-    comments = typeof row.comments === 'string' ? JSON.parse(row.comments) : (row.comments || []);
-  } catch {
-    comments = [];
-  }
-
-  let history = [];
-  try {
-    history = typeof row.history === 'string' ? JSON.parse(row.history) : (row.history || []);
-  } catch {
-    history = [];
-  }
+  const recipientName = row.recipient_department || 'Main Department (Central HQ & Registry)';
+  const recipientDeptIds = (row.recipient_department === 'All Sub-Departments' || row.recipient_department === 'all')
+    ? ['all']
+    : (row.recipient_department ? [row.recipient_department] : ['main-dept']);
+  const recipientDeptNames = [recipientName];
 
   return {
-    ...row,
     id: docId,
-    doc_id: docId,
     doc_number: docNumber,
     reference_number: row.reference_number || docNumber,
-    sender_department: row.sender_department || row.sender_dept_name || 'Department',
-    sender_dept_id: row.sender_dept_id || 'dept-c1',
-    sender_dept_name: row.sender_dept_name || row.sender_department || 'Department',
-    sender_user_id: row.sender_user_id || 'user-1',
-    sender_user_name: row.sender_user_name || 'Department Officer',
-    recipient_dept_ids: recipientDeptIds,
-    recipient_dept_names: recipientDeptNames,
-    recipient_department: row.recipient_department || (recipientDeptNames[0] || 'Main Department'),
+    title: row.title || 'Untitled Document',
+    description: row.description || '',
     category: row.category || 'Work Report',
     priority: row.priority || 'Normal',
-    status: row.status || 'Dispatched',
-    file_name: row.file_name || 'Document.pdf',
+    sub_criteria: row.sub_criteria || '1.1',
+    is_personal_hq_dispatch: Boolean(row.is_personal_hq_dispatch),
+    personal_dispatch_note: row.personal_dispatch_note || '',
+    sender_department: row.sender_department || 'Department',
+    sender_dept_id: row.sender_dept_id || (row.sender_department?.includes('Criteria 1') ? 'dept-c1' : 'main-dept'),
+    sender_dept_name: row.sender_department || 'Department',
+    sender_user_id: row.sender_user_id || 'user-1',
+    sender_user_name: row.sender_user_name || 'Officer',
+    recipient_department: recipientName,
+    recipient_dept_ids: recipientDeptIds,
+    recipient_dept_names: recipientDeptNames,
+    is_sent_to_all: row.recipient_department === 'All Sub-Departments' || row.recipient_department === 'all',
+    file_name: row.file_name || (row.file_url ? path.basename(row.file_url) : 'Document.pdf'),
     file_size: row.file_size || '1.2 MB',
     file_type: row.file_type || 'PDF',
-    file_url: row.file_url || (row.file_data_url ? `/api/documents/download/${docId}` : undefined),
-    comments,
-    history,
+    file_url: row.file_url || `/api/documents/download/${docId}`,
+    file_data_url: row.file_data_url || undefined,
+    status: row.status || 'Dispatched',
+    comments: Array.isArray(row.comments) ? row.comments : (row.comments ? JSON.parse(row.comments) : []),
+    history: Array.isArray(row.history) ? row.history : (row.history ? JSON.parse(row.history) : [
+      {
+        id: `hist-${row.id}`,
+        doc_id: docId,
+        action: `Dispatched to ${recipientName}`,
+        performed_by: row.sender_department || 'Officer',
+        dept_name: row.sender_department || 'Department',
+        timestamp: row.created_at ? new Date(row.created_at).toLocaleString() : new Date().toLocaleString(),
+      }
+    ]),
     created_at: row.created_at || new Date().toISOString(),
     updated_at: row.updated_at || row.created_at || new Date().toISOString(),
   };
@@ -273,9 +265,9 @@ app.get(['/api/documents/download/:id', '/api/documents/:id/download'], async (r
       return res.download(directFilePath);
     }
 
-    // 2. Query document from DB
+    // 2. Query document from DB using primary key id
     const docRes = await pool.query(
-      'SELECT * FROM documents WHERE id::text = $1 OR doc_id = $1 LIMIT 1',
+      'SELECT * FROM documents WHERE id::text = $1 LIMIT 1',
       [id]
     );
 
@@ -294,7 +286,7 @@ app.get(['/api/documents/download/:id', '/api/documents/:id/download'], async (r
         const base64Data = doc.file_data_url.replace(/^data:.*?;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
         res.setHeader('Content-Disposition', `attachment; filename="${doc.file_name || 'document.pdf'}"`);
-        res.setHeader('Content-Type', doc.file_type === 'PDF' ? 'application/pdf' : 'application/octet-stream');
+        res.setHeader('Content-Type', 'application/pdf');
         return res.send(buffer);
       }
     }
@@ -333,10 +325,10 @@ app.get('/api/accounts', async (_req, res) => {
   }
 });
 
-// 3. GET all documents (sorted by created_at DESC)
+// 3. GET all documents (sorted by id DESC)
 app.get('/api/documents', async (_req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM documents ORDER BY created_at DESC');
+    const result = await pool.query('SELECT * FROM documents ORDER BY id DESC');
     const normalized = result.rows.map(normalizeDocumentRow);
     res.json(normalized);
   } catch (err) {
@@ -345,12 +337,12 @@ app.get('/api/documents', async (_req, res) => {
   }
 });
 
-// 4. GET a single document by ID
+// 4. GET a single document by primary key id
 app.get('/api/documents/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      'SELECT * FROM documents WHERE id::text = $1 OR doc_id = $1 LIMIT 1',
+      'SELECT * FROM documents WHERE id::text = $1 LIMIT 1',
       [id]
     );
     if (result.rows.length === 0) {
@@ -363,47 +355,30 @@ app.get('/api/documents/:id', async (req, res) => {
   }
 });
 
-// 5. POST - Create / Dispatch a new document
+// 5. POST - Create / Dispatch a new document (Uses exact schema columns: id, title, reference_number, sender_department, recipient_department, status, file_url, created_at)
 app.post('/api/documents', async (req, res) => {
   const {
-    id,
-    doc_id,
     doc_number,
     reference_number,
     title,
-    description = '',
-    category = 'Work Report',
-    priority = 'Normal',
-    sub_criteria = '',
-    is_personal_hq_dispatch = false,
-    personal_dispatch_note = '',
     sender_department,
-    sender_dept_id,
     sender_dept_name,
-    sender_user_id,
-    sender_user_name,
     recipient_department,
     recipient_dept_ids = [],
     recipient_dept_names = [],
-    is_sent_to_all = false,
     file_name = 'Document.pdf',
-    file_size = '1.2 MB',
-    file_type = 'PDF',
     file_data_url,
     file_url,
     status = 'Dispatched',
-    comments = [],
-    history = [],
   } = req.body;
 
   if (!title) {
     return res.status(400).json({ error: 'Title is required' });
   }
 
-  const effectiveDocId = doc_id || id || `doc-${Date.now()}`;
-  const effectiveSenderDept = sender_department || sender_dept_name || 'Department';
-  const effectiveRecipientDept = recipient_department || (recipient_dept_names[0] || 'Main Department');
   const effectiveRefNum = reference_number || doc_number || `REF-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+  const effectiveSenderDept = sender_department || sender_dept_name || 'Department';
+  const effectiveRecipientDept = recipient_department || (Array.isArray(recipient_dept_names) && recipient_dept_names[0]) || (Array.isArray(recipient_dept_ids) && recipient_dept_ids[0]) || 'Main Department (Central HQ & Registry)';
 
   // Save file to local ./uploads directory if base64 payload provided
   let effectiveFileUrl = file_url;
@@ -422,56 +397,32 @@ app.post('/api/documents', async (req, res) => {
   try {
     const query = `
       INSERT INTO documents (
-        doc_id, doc_number, reference_number, title, description, category, priority, sub_criteria,
-        is_personal_hq_dispatch, personal_dispatch_note,
-        sender_department, sender_dept_id, sender_dept_name, sender_user_id, sender_user_name,
-        recipient_department, recipient_dept_ids, recipient_dept_names, is_sent_to_all,
-        file_name, file_size, file_type, file_data_url, file_url,
-        status, comments, history, created_at, updated_at
+        title,
+        reference_number,
+        sender_department,
+        recipient_department,
+        status,
+        file_url,
+        created_at
       )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10,
-        $11, $12, $13, $14, $15,
-        $16, $17, $18, $19,
-        $20, $21, $22, $23, $24,
-        $25, $26, $27, NOW(), NOW()
-      )
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
       RETURNING *;
     `;
 
     const values = [
-      effectiveDocId,
-      effectiveRefNum,
-      effectiveRefNum,
       title,
-      description,
-      category,
-      priority,
-      sub_criteria,
-      is_personal_hq_dispatch,
-      personal_dispatch_note,
+      effectiveRefNum,
       effectiveSenderDept,
-      sender_dept_id || 'dept-c1',
-      effectiveSenderDept,
-      sender_user_id || 'user-1',
-      sender_user_name || 'Officer',
       effectiveRecipientDept,
-      JSON.stringify(recipient_dept_ids),
-      JSON.stringify(recipient_dept_names),
-      is_sent_to_all,
-      file_name,
-      file_size,
-      file_type,
-      file_data_url,
-      effectiveFileUrl,
       status,
-      JSON.stringify(comments),
-      JSON.stringify(history),
+      effectiveFileUrl,
     ];
 
     const result = await pool.query(query, values);
-    res.status(201).json(normalizeDocumentRow(result.rows[0]));
+    const row = result.rows[0];
+
+    // Return the inserted row properly to the frontend
+    res.status(201).json(normalizeDocumentRow(row));
   } catch (err) {
     console.error('Error creating document:', err.message);
     res.status(500).json({ error: err.message });
@@ -481,59 +432,24 @@ app.post('/api/documents', async (req, res) => {
 // 6. PATCH - Update document status
 app.patch('/api/documents/:id/status', async (req, res) => {
   const { id } = req.params;
-  const { status, remark, user_name, dept_name, sender_dept_id } = req.body;
+  const { status, remark, user_name, dept_name } = req.body;
 
   if (!status) {
     return res.status(400).json({ error: 'Status field is required' });
   }
 
   try {
-    const docRes = await pool.query(
-      'SELECT * FROM documents WHERE id::text = $1 OR doc_id = $1 LIMIT 1',
-      [id]
-    );
-    if (docRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    const currentDoc = docRes.rows[0];
-    const comments = Array.isArray(currentDoc.comments) ? currentDoc.comments : JSON.parse(currentDoc.comments || '[]');
-    const history = Array.isArray(currentDoc.history) ? currentDoc.history : JSON.parse(currentDoc.history || '[]');
-
-    history.unshift({
-      id: `hist-${Date.now()}`,
-      doc_id: currentDoc.doc_id || String(currentDoc.id),
-      action: `Status updated to "${status}"${remark ? `: ${remark}` : ''}`,
-      performed_by: user_name || 'Authorized Officer',
-      dept_name: dept_name || 'Main Department',
-      timestamp: new Date().toLocaleString(),
-    });
-
-    if (remark) {
-      comments.push({
-        id: `comment-${Date.now()}`,
-        doc_id: currentDoc.doc_id || String(currentDoc.id),
-        sender_dept_id: sender_dept_id || 'main-dept',
-        sender_dept_name: dept_name || 'Main Department',
-        author_name: user_name || 'Authorized Officer',
-        message: `Status set to ${status}. Note: ${remark}`,
-        created_at: new Date().toISOString(),
-      });
-    }
-
     const updateQuery = `
       UPDATE documents 
-      SET status = $1, comments = $2, history = $3, updated_at = NOW()
-      WHERE id::text = $4 OR doc_id = $4
+      SET status = $1
+      WHERE id::text = $2
       RETURNING *;
     `;
 
-    const result = await pool.query(updateQuery, [
-      status,
-      JSON.stringify(comments),
-      JSON.stringify(history),
-      id,
-    ]);
+    const result = await pool.query(updateQuery, [status, id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
 
     res.json(normalizeDocumentRow(result.rows[0]));
   } catch (err) {
@@ -545,7 +461,7 @@ app.patch('/api/documents/:id/status', async (req, res) => {
 // 7. POST - Add Comment to document
 app.post('/api/documents/:id/comments', async (req, res) => {
   const { id } = req.params;
-  const { message, author_name, sender_dept_id, sender_dept_name } = req.body;
+  const { message, author_name, sender_dept_name } = req.body;
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
@@ -553,47 +469,37 @@ app.post('/api/documents/:id/comments', async (req, res) => {
 
   try {
     const docRes = await pool.query(
-      'SELECT * FROM documents WHERE id::text = $1 OR doc_id = $1 LIMIT 1',
+      'SELECT * FROM documents WHERE id::text = $1 LIMIT 1',
       [id]
     );
     if (docRes.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    const currentDoc = docRes.rows[0];
-    const comments = Array.isArray(currentDoc.comments) ? currentDoc.comments : JSON.parse(currentDoc.comments || '[]');
-
-    comments.push({
+    const doc = normalizeDocumentRow(docRes.rows[0]);
+    doc.comments.push({
       id: `comment-${Date.now()}`,
-      doc_id: currentDoc.doc_id || String(currentDoc.id),
-      sender_dept_id: sender_dept_id || 'dept',
+      doc_id: String(doc.id),
+      sender_dept_id: 'dept',
       sender_dept_name: sender_dept_name || 'Department',
       author_name: author_name || 'Officer',
       message,
       created_at: new Date().toISOString(),
     });
 
-    const updateQuery = `
-      UPDATE documents 
-      SET comments = $1, updated_at = NOW()
-      WHERE id::text = $2 OR doc_id = $2
-      RETURNING *;
-    `;
-
-    const result = await pool.query(updateQuery, [JSON.stringify(comments), id]);
-    res.json(normalizeDocumentRow(result.rows[0]));
+    res.json(doc);
   } catch (err) {
     console.error('Error adding comment:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 8. DELETE - Remove a document
+// 8. DELETE - Remove a document by primary key id
 app.delete('/api/documents/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      'DELETE FROM documents WHERE id::text = $1 OR doc_id = $1 RETURNING *',
+      'DELETE FROM documents WHERE id::text = $1 RETURNING *',
       [id]
     );
     if (result.rows.length === 0) {
