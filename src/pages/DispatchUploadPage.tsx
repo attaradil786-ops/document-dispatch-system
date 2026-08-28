@@ -139,11 +139,24 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
   const [attachedFiles, setAttachedFiles] = useState<AttachedFileItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [uploadError, setUploadError] = useState('');
 
   const handleMultipleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
 
     const filesArray: File[] = Array.from(e.target.files);
+    setUploadError('');
+
+    // Auto-fill title from first attached file if title is currently empty
+    if (!title.trim() && filesArray.length > 0) {
+      const cleanName = filesArray[0].name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[_-]/g, ' ')
+        .trim();
+      if (cleanName) {
+        setTitle(cleanName);
+      }
+    }
     
     filesArray.forEach((selectedFile: File) => {
       const fileSizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2) + ' MB';
@@ -199,22 +212,69 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !user) return;
+    const effectiveTitle =
+      title.trim() ||
+      (attachedFiles.length > 0
+        ? attachedFiles[0].name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').trim()
+        : '');
+
+    if (!effectiveTitle) {
+      setUploadError('Please enter a document title or select at least one file to upload.');
+      return;
+    }
+
+    if (!user) {
+      setUploadError('User session not found. Please log in again.');
+      return;
+    }
 
     setIsSubmitting(true);
+    setUploadError('');
 
     setTimeout(() => {
-      if (attachedFiles.length > 0) {
-        // Multi-file dispatch: Create 1 document per attached file
-        attachedFiles.forEach((fileItem, index) => {
-          const docTitle =
-            attachedFiles.length === 1
-              ? title.trim()
-              : `${title.trim()} (${index + 1}/${attachedFiles.length}: ${fileItem.name})`;
+      try {
+        if (attachedFiles.length > 0) {
+          // Multi-file dispatch: Create 1 document per attached file
+          attachedFiles.forEach((fileItem, index) => {
+            const docTitle =
+              attachedFiles.length === 1
+                ? effectiveTitle
+                : `${effectiveTitle} (${index + 1}/${attachedFiles.length}: ${fileItem.name})`;
+
+            storageService.addDocument(
+              {
+                title: docTitle,
+                description: description.trim(),
+                category,
+                priority,
+                subCriteria,
+                isPersonalHqDispatch: isMainDept ? isPersonalHqDispatch : false,
+                personalDispatchNote: isMainDept && isPersonalHqDispatch ? personalDispatchNote.trim() : undefined,
+                targetDeptIds: selectedTargets,
+                fileName: fileItem.name,
+                fileSize: fileItem.sizeMb,
+                fileType: fileItem.fileType,
+                fileDataUrl: fileItem.dataUrl,
+              },
+              user
+            );
+          });
+
+          setIsSubmitting(false);
+          setSuccessMsg(
+            `Successfully uploaded and dispatched ${attachedFiles.length} ${
+              attachedFiles.length === 1 ? 'document' : 'documents'
+            } simultaneously!`
+          );
+        } else {
+          // Fallback single document dispatch
+          const fileSizeMb = '1.2 MB';
+          const fileName = `${effectiveTitle.replace(/\s+/g, '_')}.pdf`;
+          const fileType = 'PDF';
 
           storageService.addDocument(
             {
-              title: docTitle,
+              title: effectiveTitle,
               description: description.trim(),
               category,
               priority,
@@ -222,52 +282,26 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
               isPersonalHqDispatch: isMainDept ? isPersonalHqDispatch : false,
               personalDispatchNote: isMainDept && isPersonalHqDispatch ? personalDispatchNote.trim() : undefined,
               targetDeptIds: selectedTargets,
-              fileName: fileItem.name,
-              fileSize: fileItem.sizeMb,
-              fileType: fileItem.fileType,
-              fileDataUrl: fileItem.dataUrl,
+              fileName,
+              fileSize: fileSizeMb,
+              fileType,
             },
             user
           );
-        });
 
+          setIsSubmitting(false);
+          setSuccessMsg('Document successfully uploaded and dispatched!');
+        }
+
+        setTimeout(() => {
+          onSuccess();
+        }, 1200);
+      } catch (err: any) {
+        console.error('Error uploading document:', err);
         setIsSubmitting(false);
-        setSuccessMsg(
-          `Successfully uploaded and dispatched ${attachedFiles.length} ${
-            attachedFiles.length === 1 ? 'document' : 'documents'
-          } simultaneously!`
-        );
-      } else {
-        // Fallback single document dispatch
-        const fileSizeMb = '1.2 MB';
-        const fileName = `${title.replace(/\s+/g, '_')}.pdf`;
-        const fileType = 'PDF';
-
-        storageService.addDocument(
-          {
-            title: title.trim(),
-            description: description.trim(),
-            category,
-            priority,
-            subCriteria,
-            isPersonalHqDispatch: isMainDept ? isPersonalHqDispatch : false,
-            personalDispatchNote: isMainDept && isPersonalHqDispatch ? personalDispatchNote.trim() : undefined,
-            targetDeptIds: selectedTargets,
-            fileName,
-            fileSize: fileSizeMb,
-            fileType,
-          },
-          user
-        );
-
-        setIsSubmitting(false);
-        setSuccessMsg('Document successfully uploaded and dispatched!');
+        setUploadError(err?.message || 'Failed to dispatch document. Please try again.');
       }
-
-      setTimeout(() => {
-        onSuccess();
-      }, 1200);
-    }, 600);
+    }, 400);
   };
 
   return (
@@ -291,6 +325,13 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
           </div>
         </div>
       </div>
+
+      {uploadError && (
+        <div className="flex items-center gap-3 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 p-4 text-rose-800 dark:text-rose-200 font-bold text-xs animate-in zoom-in-95">
+          <AlertCircle className="h-5 w-5 text-rose-600 shrink-0" />
+          <span>{uploadError}</span>
+        </div>
+      )}
 
       {successMsg && (
         <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 p-4 text-emerald-800 dark:text-emerald-200 font-bold text-xs animate-in zoom-in-95">
@@ -857,7 +898,7 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
         <div className="flex items-center justify-end gap-3">
           <button
             type="submit"
-            disabled={isSubmitting || !title.trim()}
+            disabled={isSubmitting || (!title.trim() && attachedFiles.length === 0)}
             className="flex items-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 text-xs font-bold text-white shadow-lg shadow-blue-500/25 hover:bg-blue-700 disabled:opacity-50 transition-all cursor-pointer"
           >
             <Send className="h-4 w-4" />

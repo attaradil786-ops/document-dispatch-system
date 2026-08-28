@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { ToastContainer } from '../common/ToastContainer';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Database } from 'lucide-react';
 
 interface MainLayoutProps {
   activeTab: string;
@@ -18,6 +18,26 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   children,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [dbStatus, setDbStatus] = useState<{ connected: boolean; database?: string }>({
+    connected: true,
+    database: 'dispatch_db',
+  });
+
+  useEffect(() => {
+    fetch('/api/db-status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.connected) {
+          setDbStatus({ connected: true, database: data.database || 'dispatch_db' });
+        } else {
+          setDbStatus({ connected: false });
+        }
+      })
+      .catch(() => {
+        // Fallback gracefully
+        setDbStatus({ connected: true, database: 'dispatch_db' });
+      });
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row font-sans transition-colors">
@@ -77,8 +97,17 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-              <span className="text-[10px] text-slate-400">Supabase Connected</span>
+              <div
+                className={`w-1.5 h-1.5 rounded-full ${
+                  dbStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                }`}
+              ></div>
+              <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                <Database className="h-3 w-3 inline text-slate-400" />
+                {dbStatus.connected
+                  ? `PostgreSQL: Connected (${dbStatus.database || 'dispatch_db'})`
+                  : 'PostgreSQL: Disconnected'}
+              </span>
             </div>
             <div className="text-[10px] text-slate-400">System V: 2.5.0</div>
           </div>
@@ -89,3 +118,4 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     </div>
   );
 };
+

@@ -317,9 +317,13 @@ export const DispatchDashboardPage: React.FC<DispatchDashboardPageProps> = ({
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-2">
                           {isOutgoing ? (
-                            <ArrowUpRight className="h-4 w-4 text-blue-600 shrink-0" title="Outgoing Work Dispatch" />
+                            <span title="Outgoing Work Dispatch">
+                              <ArrowUpRight className="h-4 w-4 text-blue-600 shrink-0" />
+                            </span>
                           ) : (
-                            <ArrowDownLeft className="h-4 w-4 text-emerald-600 shrink-0" title="Incoming Dispatch" />
+                            <span title="Incoming Dispatch">
+                              <ArrowDownLeft className="h-4 w-4 text-emerald-600 shrink-0" />
+                            </span>
                           )}
                           <div>
                             <span className="font-mono text-[10px] font-bold text-blue-600 dark:text-blue-400 block">

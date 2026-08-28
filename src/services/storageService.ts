@@ -9,24 +9,14 @@ import {
   DocumentCategory,
   DocumentPriority,
 } from '../types';
-import { db } from '../firebase';
-import {
-  collection,
-  doc,
-  setDoc,
-  deleteDoc,
-  onSnapshot,
-  getDocs,
-} from 'firebase/firestore';
 
 const STORAGE_KEYS = {
-  DEPARTMENTS: 'DISPATCH_DEPARTMENTS_V3',
-  ACCOUNTS: 'DISPATCH_ACCOUNTS_V3',
-  DOCUMENTS: 'DISPATCH_DOCUMENTS_V5',
-  CLOUD_SYNCED: 'DISPATCH_CLOUD_SYNCED',
+  DEPARTMENTS: 'DISPATCH_DEPARTMENTS_PG',
+  ACCOUNTS: 'DISPATCH_ACCOUNTS_PG',
+  DOCUMENTS: 'DISPATCH_DOCUMENTS_PG',
 };
 
-// Seed Departments: Main HQ + Criteria 1 through Criteria 7
+// Default Fallback Seed Departments (Central HQ & Criteria 1 through Criteria 7)
 const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'main-dept',
@@ -42,7 +32,7 @@ const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'dept-c1',
     code: 'CRITERIA 1',
-    name: 'Criteria 1',
+    name: 'Criteria 1 - Curricular Aspects',
     is_main: false,
     email: 'criteria1@college.edu',
     head_officer: 'Criteria 1 Officer',
@@ -54,7 +44,7 @@ const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'dept-c2',
     code: 'CRITERIA 2',
-    name: 'Criteria 2',
+    name: 'Criteria 2 - Teaching-Learning & Evaluation',
     is_main: false,
     email: 'criteria2@college.edu',
     head_officer: 'Criteria 2 Officer',
@@ -66,7 +56,7 @@ const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'dept-c3',
     code: 'CRITERIA 3',
-    name: 'Criteria 3',
+    name: 'Criteria 3 - Research, Innovations & Extension',
     is_main: false,
     email: 'criteria3@college.edu',
     head_officer: 'Criteria 3 Officer',
@@ -78,7 +68,7 @@ const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'dept-c4',
     code: 'CRITERIA 4',
-    name: 'Criteria 4',
+    name: 'Criteria 4 - Infrastructure & Learning Resources',
     is_main: false,
     email: 'criteria4@college.edu',
     head_officer: 'Criteria 4 Officer',
@@ -90,7 +80,7 @@ const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'dept-c5',
     code: 'CRITERIA 5',
-    name: 'Criteria 5',
+    name: 'Criteria 5 - Student Support & Progression',
     is_main: false,
     email: 'criteria5@college.edu',
     head_officer: 'Criteria 5 Officer',
@@ -102,7 +92,7 @@ const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'dept-c6',
     code: 'CRITERIA 6',
-    name: 'Criteria 6',
+    name: 'Criteria 6 - Governance, Leadership & Management',
     is_main: false,
     email: 'criteria6@college.edu',
     head_officer: 'Criteria 6 Officer',
@@ -114,7 +104,7 @@ const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'dept-c7',
     code: 'CRITERIA 7',
-    name: 'Criteria 7',
+    name: 'Criteria 7 - Institutional Values & Best Practices',
     is_main: false,
     email: 'criteria7@college.edu',
     head_officer: 'Criteria 7 Officer',
@@ -125,7 +115,7 @@ const SEED_DEPARTMENTS: Department[] = [
   },
 ];
 
-// Seed Accounts: Main HQ + Criteria 1 through Criteria 7 with passwords criteria@1, criteria@2, ... criteria@7
+// Default Fallback Seed Accounts
 const SEED_ACCOUNTS: UserAccount[] = [
   {
     id: 'user-main',
@@ -147,9 +137,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
     full_name: 'Criteria 1 Officer',
     role: 'department_user',
     department_id: 'dept-c1',
-    department_name: 'Criteria 1',
+    department_name: 'Criteria 1 - Curricular Aspects',
     is_main_dept: false,
-    role_title: 'Criteria 1 Coordinator',
+    role_title: 'Lead Criteria 1 Coordinator',
     status: 'active',
     created_at: '2026-01-01',
   },
@@ -160,9 +150,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
     full_name: 'Criteria 2 Officer',
     role: 'department_user',
     department_id: 'dept-c2',
-    department_name: 'Criteria 2',
+    department_name: 'Criteria 2 - Teaching-Learning & Evaluation',
     is_main_dept: false,
-    role_title: 'Criteria 2 Coordinator',
+    role_title: 'Lead Criteria 2 Coordinator',
     status: 'active',
     created_at: '2026-01-01',
   },
@@ -173,9 +163,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
     full_name: 'Criteria 3 Officer',
     role: 'department_user',
     department_id: 'dept-c3',
-    department_name: 'Criteria 3',
+    department_name: 'Criteria 3 - Research, Innovations & Extension',
     is_main_dept: false,
-    role_title: 'Criteria 3 Coordinator',
+    role_title: 'Lead Criteria 3 Coordinator',
     status: 'active',
     created_at: '2026-01-01',
   },
@@ -186,9 +176,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
     full_name: 'Criteria 4 Officer',
     role: 'department_user',
     department_id: 'dept-c4',
-    department_name: 'Criteria 4',
+    department_name: 'Criteria 4 - Infrastructure & Learning Resources',
     is_main_dept: false,
-    role_title: 'Criteria 4 Coordinator',
+    role_title: 'Lead Criteria 4 Coordinator',
     status: 'active',
     created_at: '2026-01-01',
   },
@@ -199,9 +189,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
     full_name: 'Criteria 5 Officer',
     role: 'department_user',
     department_id: 'dept-c5',
-    department_name: 'Criteria 5',
+    department_name: 'Criteria 5 - Student Support & Progression',
     is_main_dept: false,
-    role_title: 'Criteria 5 Coordinator',
+    role_title: 'Lead Criteria 5 Coordinator',
     status: 'active',
     created_at: '2026-01-01',
   },
@@ -212,9 +202,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
     full_name: 'Criteria 6 Officer',
     role: 'department_user',
     department_id: 'dept-c6',
-    department_name: 'Criteria 6',
+    department_name: 'Criteria 6 - Governance, Leadership & Management',
     is_main_dept: false,
-    role_title: 'Criteria 6 Coordinator',
+    role_title: 'Lead Criteria 6 Coordinator',
     status: 'active',
     created_at: '2026-01-01',
   },
@@ -225,232 +215,11 @@ const SEED_ACCOUNTS: UserAccount[] = [
     full_name: 'Criteria 7 Officer',
     role: 'department_user',
     department_id: 'dept-c7',
-    department_name: 'Criteria 7',
+    department_name: 'Criteria 7 - Institutional Values & Best Practices',
     is_main_dept: false,
-    role_title: 'Criteria 7 Coordinator',
+    role_title: 'Lead Criteria 7 Coordinator',
     status: 'active',
     created_at: '2026-01-01',
-  },
-];
-
-// Seed Initial Documents
-const SEED_DOCUMENTS: DocumentItem[] = [
-  {
-    id: 'doc-001',
-    doc_number: 'DOC-2026-MAIN-001',
-    title: 'Institutional Accreditation & Quality Compliance Circular',
-    description:
-      'Mandatory guidelines for all Criteria 1 through 7 departments to submit self-evaluation reports prior to national accreditation board audit.',
-    category: 'Policy & Circular',
-    priority: 'Urgent',
-    sub_criteria: '1.1',
-    sender_dept_id: 'main-dept',
-    sender_dept_name: 'Main Department (Central HQ & Registry)',
-    sender_user_id: 'user-main',
-    sender_user_name: 'Dr. Arthur Pendelton',
-    recipient_dept_ids: ['all'],
-    recipient_dept_names: ['All Sub-Departments'],
-    is_sent_to_all: true,
-    file_name: 'Accreditation_Directive_2026.pdf',
-    file_size: '2.4 MB',
-    file_type: 'PDF',
-    status: 'Dispatched',
-    created_at: '2026-08-01T09:00:00Z',
-    updated_at: '2026-08-01T09:00:00Z',
-    comments: [
-      {
-        id: 'c-1',
-        doc_id: 'doc-001',
-        sender_dept_id: 'main-dept',
-        sender_dept_name: 'Main Department',
-        author_name: 'Dr. Arthur Pendelton',
-        message: 'Please review and confirm receipt by end of week.',
-        created_at: '2026-08-01T09:05:00Z',
-      },
-    ],
-    history: [
-      {
-        id: 'h-1',
-        doc_id: 'doc-001',
-        action: 'Document Dispatched to ALL Sub-Departments',
-        performed_by: 'Dr. Arthur Pendelton',
-        dept_name: 'Main Department',
-        timestamp: '2026-08-01 09:00 AM',
-      },
-    ],
-  },
-  {
-    id: 'doc-002',
-    doc_number: 'DOC-2026-C1-014',
-    title: 'Criteria 1 Curricular Aspects Compliance & Work Report',
-    description:
-      'Comprehensive report on curriculum revisions, course outcomes, and academic flexibility documentation for Criteria 1.',
-    category: 'Work Report',
-    priority: 'Normal',
-    sub_criteria: '1.2',
-    sender_dept_id: 'dept-c1',
-    sender_dept_name: 'Criteria 1',
-    sender_user_id: 'user-c1',
-    sender_user_name: 'Criteria 1 Officer',
-    recipient_dept_ids: ['main-dept'],
-    recipient_dept_names: ['Main Department (Central HQ & Registry)'],
-    is_sent_to_all: false,
-    file_name: 'Criteria1_Curriculum_Report.pdf',
-    file_size: '4.8 MB',
-    file_type: 'PDF',
-    status: 'Approved',
-    created_at: '2026-08-05T11:30:00Z',
-    updated_at: '2026-08-06T14:20:00Z',
-    comments: [
-      {
-        id: 'c-2',
-        doc_id: 'doc-002',
-        sender_dept_id: 'dept-c1',
-        sender_dept_name: 'Criteria 1',
-        author_name: 'Criteria 1 Officer',
-        message: 'Submitting Criteria 1 work progress report for Central Registry verification.',
-        created_at: '2026-08-05T11:32:00Z',
-      },
-      {
-        id: 'c-3',
-        doc_id: 'doc-002',
-        sender_dept_id: 'main-dept',
-        sender_dept_name: 'Main Department',
-        author_name: 'Dr. Arthur Pendelton',
-        message: 'Work report approved. Documentation verified.',
-        created_at: '2026-08-06T14:20:00Z',
-      },
-    ],
-    history: [
-      {
-        id: 'h-2',
-        doc_id: 'doc-002',
-        action: 'Work Document Uploaded & Sent to Main Department',
-        performed_by: 'Criteria 1 Officer',
-        dept_name: 'Criteria 1',
-        timestamp: '2026-08-05 11:30 AM',
-      },
-      {
-        id: 'h-3',
-        doc_id: 'doc-002',
-        action: 'Reviewed and Approved by Main Department',
-        performed_by: 'Dr. Arthur Pendelton',
-        dept_name: 'Main Department',
-        timestamp: '2026-08-06 02:20 PM',
-      },
-    ],
-  },
-  {
-    id: 'doc-003',
-    doc_number: 'DOC-2026-C2-008',
-    title: 'Criteria 2 Teaching-Learning & Evaluation Audit Statement',
-    description:
-      'Detailed audit breakdown of student enrollment, teacher profile, and evaluation process for Criteria 2.',
-    category: 'Work Report',
-    priority: 'Confidential',
-    sub_criteria: '2.1',
-    sender_dept_id: 'dept-c2',
-    sender_dept_name: 'Criteria 2',
-    sender_user_id: 'user-c2',
-    sender_user_name: 'Criteria 2 Officer',
-    recipient_dept_ids: ['main-dept'],
-    recipient_dept_names: ['Main Department (Central HQ & Registry)'],
-    is_sent_to_all: false,
-    file_name: 'Criteria2_Evaluation_Audit.xlsx',
-    file_size: '1.9 MB',
-    file_type: 'XLSX',
-    status: 'Under Review',
-    created_at: '2026-08-08T15:45:00Z',
-    updated_at: '2026-08-08T15:45:00Z',
-    comments: [],
-    history: [
-      {
-        id: 'h-4',
-        doc_id: 'doc-003',
-        action: 'Criteria 2 Audit Document Sent to Main Dept',
-        performed_by: 'Criteria 2 Officer',
-        dept_name: 'Criteria 2',
-        timestamp: '2026-08-08 03:45 PM',
-      },
-    ],
-  },
-  {
-    id: 'doc-004',
-    doc_number: 'DOC-2026-MAIN-009',
-    title: 'Direct Order to Criteria 3: Research & Innovations Review',
-    description:
-      'Direct order regarding research publication metrics and consultancy project documentation for Criteria 3.',
-    category: 'Policy & Circular',
-    priority: 'Confidential',
-    sub_criteria: '3.1',
-    sender_dept_id: 'main-dept',
-    sender_dept_name: 'Main Department (Central HQ & Registry)',
-    sender_user_id: 'user-main',
-    sender_user_name: 'Dr. Arthur Pendelton',
-    recipient_dept_ids: ['dept-c3'],
-    recipient_dept_names: ['Criteria 3'],
-    is_sent_to_all: false,
-    file_name: 'Criteria3_Research_Directive.pdf',
-    file_size: '1.2 MB',
-    file_type: 'PDF',
-    status: 'Action Taken',
-    created_at: '2026-08-09T10:15:00Z',
-    updated_at: '2026-08-10T09:00:00Z',
-    comments: [],
-    history: [
-      {
-        id: 'h-5',
-        doc_id: 'doc-004',
-        action: 'Targeted Document Dispatched from Main Dept to Criteria 3',
-        performed_by: 'Dr. Arthur Pendelton',
-        dept_name: 'Main Department',
-        timestamp: '2026-08-09 10:15 AM',
-      },
-    ],
-  },
-  {
-    id: 'doc-005',
-    doc_number: 'DOC-2026-C5-021',
-    title: 'Criteria 5.5 Student Support & Placement Compliance Dossier',
-    description:
-      'Official submission for Criteria 5.5 detailing alumni support, student welfare schemes, and placement records sent directly to Main HQ.',
-    category: 'Work Report',
-    priority: 'Urgent',
-    sub_criteria: '5.5',
-    sender_dept_id: 'dept-c5',
-    sender_dept_name: 'Criteria 5',
-    sender_user_id: 'user-c5',
-    sender_user_name: 'Criteria 5 Officer',
-    recipient_dept_ids: ['main-dept'],
-    recipient_dept_names: ['Main Department (Central HQ & Registry)'],
-    is_sent_to_all: false,
-    file_name: 'Criteria5.5_Student_Support_Dossier.pdf',
-    file_size: '3.6 MB',
-    file_type: 'PDF',
-    status: 'Under Review',
-    created_at: '2026-08-11T14:20:00Z',
-    updated_at: '2026-08-11T14:20:00Z',
-    comments: [
-      {
-        id: 'c-5',
-        doc_id: 'doc-005',
-        sender_dept_id: 'dept-c5',
-        sender_dept_name: 'Criteria 5',
-        author_name: 'Criteria 5 Officer',
-        message: 'Dispatched Criteria 5.5 documentation to Main HQ for review.',
-        created_at: '2026-08-11T14:22:00Z',
-      },
-    ],
-    history: [
-      {
-        id: 'h-6',
-        doc_id: 'doc-005',
-        action: 'Criteria 5.5 Document Uploaded to Main HQ',
-        performed_by: 'Criteria 5 Officer',
-        dept_name: 'Criteria 5',
-        timestamp: '2026-08-11 02:20 PM',
-      },
-    ],
   },
 ];
 
@@ -458,9 +227,16 @@ type ListenerCallback = () => void;
 
 class StorageService {
   private listeners: Set<ListenerCallback> = new Set();
-  private isFirebaseConnected = false;
+  private isPostgreConnected = false;
+  private syncTimer: any = null;
 
-  private initStorage() {
+  constructor() {
+    this.initLocalStorage();
+    this.fetchRemoteData();
+    this.startPeriodicSync();
+  }
+
+  private initLocalStorage() {
     if (!localStorage.getItem(STORAGE_KEYS.DEPARTMENTS)) {
       localStorage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify(SEED_DEPARTMENTS));
     }
@@ -468,13 +244,28 @@ class StorageService {
       localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(SEED_ACCOUNTS));
     }
     if (!localStorage.getItem(STORAGE_KEYS.DOCUMENTS)) {
-      localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(SEED_DOCUMENTS));
+      localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify([]));
     }
   }
 
-  constructor() {
-    this.initStorage();
-    this.initFirebaseSync();
+  private saveDocumentsLocally(docs: DocumentItem[]) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
+    } catch (err) {
+      console.warn('LocalStorage quota warning, saving lightweight payload...', err);
+      try {
+        const lightweight = docs.map((doc) => {
+          if (doc.file_data_url && doc.file_data_url.length > 50000) {
+            const { file_data_url, ...rest } = doc;
+            return rest as DocumentItem;
+          }
+          return doc;
+        });
+        localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(lightweight));
+      } catch (inner) {
+        console.error('Failed to save to localStorage:', inner);
+      }
+    }
   }
 
   public subscribe(callback: ListenerCallback): () => void {
@@ -487,80 +278,75 @@ class StorageService {
       try {
         cb();
       } catch (err) {
-        console.error('Error notifying storage listener:', err);
+        console.error('Listener notify error:', err);
       }
     });
   }
 
   public isCloudConnected(): boolean {
-    return this.isFirebaseConnected;
+    return this.isPostgreConnected;
   }
 
-  /**
-   * Initialize Firestore Real-Time Synchronization
-   */
-  private async initFirebaseSync() {
+  // --- Real-time Periodic Polling with PostgreSQL ---
+  private async fetchRemoteData() {
     try {
-      // 1. Sync Departments
-      const deptsCol = collection(db, 'departments');
-      onSnapshot(deptsCol, (snapshot) => {
-        if (!snapshot.empty) {
-          const cloudDepts = snapshot.docs.map((docSnap) => docSnap.data() as Department);
-          localStorage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify(cloudDepts));
-          this.isFirebaseConnected = true;
-          this.notify();
-        } else {
-          // Seed to Firestore
-          SEED_DEPARTMENTS.forEach((d) => {
-            setDoc(doc(db, 'departments', d.id), d).catch(() => {});
-          });
-        }
-      });
+      // 1. Fetch Documents
+      const docRes = await fetch('/api/documents');
+      if (docRes.ok) {
+        const remoteDocs: any[] = await docRes.json();
+        const normalizedDocs: DocumentItem[] = remoteDocs.map((d) => ({
+          ...d,
+          recipient_dept_ids: typeof d.recipient_dept_ids === 'string' ? JSON.parse(d.recipient_dept_ids) : d.recipient_dept_ids || [],
+          recipient_dept_names: typeof d.recipient_dept_names === 'string' ? JSON.parse(d.recipient_dept_names) : d.recipient_dept_names || [],
+          comments: typeof d.comments === 'string' ? JSON.parse(d.comments) : d.comments || [],
+          history: typeof d.history === 'string' ? JSON.parse(d.history) : d.history || [],
+        }));
 
-      // 2. Sync Accounts
-      const accountsCol = collection(db, 'accounts');
-      onSnapshot(accountsCol, (snapshot) => {
-        if (!snapshot.empty) {
-          const cloudAccs = snapshot.docs.map((docSnap) => docSnap.data() as UserAccount);
-          localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(cloudAccs));
-          this.isFirebaseConnected = true;
-          this.notify();
-        } else {
-          // Seed to Firestore
-          SEED_ACCOUNTS.forEach((acc) => {
-            setDoc(doc(db, 'accounts', acc.id), acc).catch(() => {});
-          });
-        }
-      });
+        this.saveDocumentsLocally(normalizedDocs);
+        this.isPostgreConnected = true;
+        this.notify();
+      }
 
-      // 3. Sync Documents in Real-Time
-      const docsCol = collection(db, 'documents');
-      onSnapshot(docsCol, (snapshot) => {
-        if (!snapshot.empty) {
-          const cloudDocs = snapshot.docs.map((docSnap) => docSnap.data() as DocumentItem);
-          // Sort by newest created_at
-          cloudDocs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-          localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(cloudDocs));
-          this.isFirebaseConnected = true;
+      // 2. Fetch Departments
+      const deptRes = await fetch('/api/departments');
+      if (deptRes.ok) {
+        const remoteDepts: Department[] = await deptRes.json();
+        if (remoteDepts.length > 0) {
+          localStorage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify(remoteDepts));
           this.notify();
-        } else {
-          // Seed to Firestore
-          SEED_DOCUMENTS.forEach((docItem) => {
-            setDoc(doc(db, 'documents', docItem.id), docItem).catch(() => {});
-          });
         }
-      });
+      }
 
-      this.isFirebaseConnected = true;
+      // 3. Fetch Accounts
+      const accRes = await fetch('/api/accounts');
+      if (accRes.ok) {
+        const remoteAccs: UserAccount[] = await accRes.json();
+        if (remoteAccs.length > 0) {
+          localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(remoteAccs));
+          this.notify();
+        }
+      }
     } catch (err) {
-      console.warn('Firebase Firestore offline or initialization warning:', err);
+      // Offline or local development fallback
+      console.warn('Backend PostgreSQL synchronization check:', err);
     }
+  }
+
+  private startPeriodicSync() {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    this.syncTimer = setInterval(() => {
+      this.fetchRemoteData();
+    }, 5000);
   }
 
   // --- Departments ---
   public getDepartments(): Department[] {
-    this.initStorage();
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.DEPARTMENTS) || '[]');
+    this.initLocalStorage();
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEYS.DEPARTMENTS) || '[]') || SEED_DEPARTMENTS;
+    } catch {
+      return SEED_DEPARTMENTS;
+    }
   }
 
   public getSubDepartments(): Department[] {
@@ -571,17 +357,22 @@ class StorageService {
     return this.getDepartments().find((d) => d.is_main) || SEED_DEPARTMENTS[0];
   }
 
-  // --- Accounts / Auth ---
+  // --- Accounts / Authentication ---
   public getAccounts(): UserAccount[] {
-    this.initStorage();
-    const raw: UserAccount[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.ACCOUNTS) || '[]');
-    return raw.map((acc) => {
-      const seed = SEED_ACCOUNTS.find((s) => s.id === acc.id || s.email === acc.email);
-      return {
-        ...acc,
-        password: acc.password || seed?.password || 'criteria@1',
-      };
-    });
+    this.initLocalStorage();
+    try {
+      const raw: UserAccount[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.ACCOUNTS) || '[]');
+      if (raw.length === 0) return SEED_ACCOUNTS;
+      return raw.map((acc) => {
+        const seed = SEED_ACCOUNTS.find((s) => s.id === acc.id || s.email === acc.email);
+        return {
+          ...acc,
+          password: acc.password || seed?.password || 'criteria@1',
+        };
+      });
+    } catch {
+      return SEED_ACCOUNTS;
+    }
   }
 
   public getAccountByEmail(email: string): UserAccount | undefined {
@@ -590,18 +381,16 @@ class StorageService {
     );
   }
 
-  // --- Documents & Strict Isolation Filters ---
+  // --- Documents & Strict Routing Security ---
   public getAllDocuments(): DocumentItem[] {
-    this.initStorage();
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.DOCUMENTS) || '[]');
+    this.initLocalStorage();
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEYS.DOCUMENTS) || '[]');
+    } catch {
+      return [];
+    }
   }
 
-  /**
-   * STRICT SECURITY FILTER (RLS):
-   * - Main Department: Can view all documents across the institution.
-   * - Sub-Department: Can ONLY view documents sent BY their department OR sent TO their department (including broadcast "all").
-   *   Strictly excludes document exchanges between other sub-departments!
-   */
   public getDocumentsForUser(userDeptId: string, isMainDept: boolean): DocumentItem[] {
     const allDocs = this.getAllDocuments();
     if (isMainDept) {
@@ -610,19 +399,14 @@ class StorageService {
 
     return allDocs.filter((doc) => {
       const isSender = doc.sender_dept_id === userDeptId;
-      const isDirectRecipient = doc.recipient_dept_ids.includes(userDeptId);
+      const isDirectRecipient = doc.recipient_dept_ids && doc.recipient_dept_ids.includes(userDeptId);
       const isBroadcastToAll = doc.is_sent_to_all;
 
       return isSender || isDirectRecipient || isBroadcastToAll;
     });
   }
 
-  /**
-   * Dispatch / Upload New Document
-   * STRICT RULE:
-   * - If user is Sub-Department: Target department is FORCE-LOCKED to 'main-dept'.
-   * - If user is Main Department: Can choose specific sub-department(s) or 'all'.
-   */
+  // --- Add / Dispatch New Document ---
   public addDocument(
     data: {
       title: string;
@@ -632,7 +416,7 @@ class StorageService {
       subCriteria?: string;
       isPersonalHqDispatch?: boolean;
       personalDispatchNote?: string;
-      targetDeptIds: string[]; // ['main-dept'] or specific or ['all']
+      targetDeptIds: string[];
       fileName: string;
       fileSize: string;
       fileType: string;
@@ -648,12 +432,10 @@ class StorageService {
     let isSentToAll = false;
 
     if (!senderUser.is_main_dept) {
-      // RULE: Sub-departments can ONLY send documents to the Main Department!
       finalTargets = ['main-dept'];
       finalTargetNames = ['Main Department (Central HQ & Registry)'];
       isSentToAll = false;
     } else {
-      // Main Department dispatching
       if (data.targetDeptIds.includes('all')) {
         isSentToAll = true;
         finalTargets = ['all'];
@@ -666,11 +448,13 @@ class StorageService {
       }
     }
 
-    const deptCode = senderUser.is_main_dept ? 'MAIN' : senderUser.department_id.replace('dept-', '').toUpperCase();
+    const deptCode = senderUser.is_main_dept
+      ? 'MAIN'
+      : senderUser.department_id.replace('dept-', '').toUpperCase();
     const docNum = `DOC-${new Date().getFullYear()}-${deptCode}-${String(allDocs.length + 1).padStart(3, '0')}`;
 
     const newDoc: DocumentItem = {
-      id: 'doc-' + Date.now(),
+      id: 'doc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       doc_number: docNum,
       title: data.title,
       description: data.description,
@@ -718,32 +502,31 @@ class StorageService {
       ],
     };
 
-    // Update local cache immediately
+    // 1. Optimistic Local Update
     allDocs.unshift(newDoc);
-    localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(allDocs));
+    this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    // Persist to Firestore Cloud Database
-    setDoc(doc(db, 'documents', newDoc.id), newDoc).catch((err) => {
-      console.warn('Failed to sync new document to Firestore:', err);
-    });
-
-    // Record Audit Log in Firestore
-    const auditEntry = {
-      id: 'audit-' + Date.now(),
-      action: 'DOCUMENT_DISPATCHED',
-      performed_by: senderUser.full_name,
-      department_id: senderUser.department_id,
-      department_name: senderUser.department_name,
-      details: `Document ${docNum} (${data.title}) dispatched to ${finalTargetNames.join(', ')}`,
-      timestamp: new Date().toISOString(),
-    };
-    setDoc(doc(db, 'audit_logs', auditEntry.id), auditEntry).catch(() => {});
+    // 2. Persist to PostgreSQL via REST API
+    fetch('/api/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newDoc),
+    })
+      .then((res) => res.json())
+      .then((saved) => {
+        if (saved && saved.id) {
+          this.fetchRemoteData();
+        }
+      })
+      .catch((err) => {
+        console.warn('PostgreSQL API dispatch synchronization notice:', err);
+      });
 
     return newDoc;
   }
 
-  // Update Document Status
+  // --- Update Document Status ---
   public updateDocumentStatus(
     docId: string,
     newStatus: DocumentItem['status'],
@@ -780,30 +563,28 @@ class StorageService {
     }
 
     allDocs[index] = docItem;
-    localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(allDocs));
+    this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    // Persist update to Firestore
-    setDoc(doc(db, 'documents', docId), docItem).catch((err) => {
-      console.warn('Failed to update document status in Firestore:', err);
-    });
-
-    // Record Audit Log
-    const auditEntry = {
-      id: 'audit-' + Date.now(),
-      action: 'STATUS_UPDATED',
-      performed_by: user.full_name,
-      department_id: user.department_id,
-      department_name: user.department_name,
-      details: `Document ${docItem.doc_number} status set to ${newStatus}${remark ? ` (${remark})` : ''}`,
-      timestamp: new Date().toISOString(),
-    };
-    setDoc(doc(db, 'audit_logs', auditEntry.id), auditEntry).catch(() => {});
+    // Persist status to PostgreSQL API
+    fetch(`/api/documents/${encodeURIComponent(docId)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: newStatus,
+        remark,
+        user_name: user.full_name,
+        dept_name: user.department_name,
+        sender_dept_id: user.department_id,
+      }),
+    })
+      .then(() => this.fetchRemoteData())
+      .catch((err) => console.warn('Status update sync notice:', err));
 
     return docItem;
   }
 
-  // Add Comment / Response to Document
+  // --- Add Comment / Response ---
   public addComment(docId: string, message: string, user: UserAccount): DocumentItem | null {
     const allDocs = this.getAllDocuments();
     const index = allDocs.findIndex((d) => d.id === docId);
@@ -822,38 +603,50 @@ class StorageService {
 
     docItem.updated_at = new Date().toISOString();
     allDocs[index] = docItem;
-    localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(allDocs));
+    this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    // Persist comment to Firestore
-    setDoc(doc(db, 'documents', docId), docItem).catch((err) => {
-      console.warn('Failed to sync comment to Firestore:', err);
-    });
+    // Persist comment to PostgreSQL API
+    fetch(`/api/documents/${encodeURIComponent(docId)}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        author_name: user.full_name,
+        sender_dept_id: user.department_id,
+        sender_dept_name: user.department_name,
+      }),
+    })
+      .then(() => this.fetchRemoteData())
+      .catch((err) => console.warn('Comment sync notice:', err));
 
     return docItem;
   }
 
-  // Delete Document
+  // --- Delete Document ---
   public deleteDocument(docId: string): boolean {
     let allDocs = this.getAllDocuments();
     allDocs = allDocs.filter((d) => d.id !== docId);
-    localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(allDocs));
+    this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    deleteDoc(doc(db, 'documents', docId)).catch((err) => {
-      console.warn('Failed to delete document from Firestore:', err);
-    });
+    fetch(`/api/documents/${encodeURIComponent(docId)}`, {
+      method: 'DELETE',
+    })
+      .then(() => this.fetchRemoteData())
+      .catch((err) => console.warn('Delete sync notice:', err));
+
     return true;
   }
 
-  // Compute Dispatch Statistics
+  // --- Compute Dispatch Stats ---
   public getDispatchStats(userDeptId: string, isMainDept: boolean): DispatchStats {
     const userDocs = this.getDocumentsForUser(userDeptId, isMainDept);
 
     return {
       totalDispatched: userDocs.length,
       receivedCount: userDocs.filter(
-        (d) => d.recipient_dept_ids.includes(userDeptId) || (d.is_sent_to_all && !isMainDept)
+        (d) => (d.recipient_dept_ids && d.recipient_dept_ids.includes(userDeptId)) || (d.is_sent_to_all && !isMainDept)
       ).length,
       pendingCount: userDocs.filter(
         (d) => d.status === 'Dispatched' || d.status === 'Under Review'
@@ -864,19 +657,17 @@ class StorageService {
     };
   }
 
-  /**
-   * Run Live RLS & Department Isolation Security Tests
-   */
-  public runSecurityAudit(currentUser: UserAccount): SecurityAuditResult[] {
+  // --- Security Audit Assertions ---
+  public runSecurityAudit(_currentUser: UserAccount): SecurityAuditResult[] {
     const allDocs = this.getAllDocuments();
     const results: SecurityAuditResult[] = [];
 
-    // Test 1: Sub-department query test
-    const c1User = this.getAccountByEmail('criteria1@college.edu')!;
+    // Test 1: Sub-department data isolation assertion
+    const c1User = this.getAccountByEmail('criteria1@college.edu') || SEED_ACCOUNTS[1];
     const c2DocsForC1 = allDocs.filter(
       (d) =>
         d.sender_dept_id === 'dept-c2' &&
-        !d.recipient_dept_ids.includes('dept-c1') &&
+        !(d.recipient_dept_ids && d.recipient_dept_ids.includes('dept-c1')) &&
         !d.is_sent_to_all
     );
 
@@ -911,7 +702,7 @@ class StorageService {
     });
 
     // Test 3: Main Department Global Query Rule
-    const mainUser = this.getAccountByEmail('main@college.edu')!;
+    const mainUser = this.getAccountByEmail('main@college.edu') || SEED_ACCOUNTS[0];
     const mainDocsCount = this.getDocumentsForUser(mainUser.department_id, mainUser.is_main_dept).length;
 
     results.push({
@@ -923,18 +714,6 @@ class StorageService {
       actual_outcome: mainDocsCount === allDocs.length ? 'Allowed' : 'Blocked (Isolated)',
       passed: mainDocsCount === allDocs.length,
       message: `PASS: Main Department seamlessly oversees all ${allDocs.length} inter-department documents.`,
-    });
-
-    // Test 4: Main Department Broadcast Dispatch Authority
-    results.push({
-      test_name: 'Main Department Multi-Department Broadcast',
-      user_dept: 'Main Department (main-dept)',
-      target_dept: 'All Sub-Departments (Broadcast)',
-      attempted_action: 'Dispatch policy circular to all sub-departments simultaneously',
-      expected_outcome: 'Allowed',
-      actual_outcome: 'Allowed',
-      passed: true,
-      message: 'PASS: Main Department holds full authority to issue institutional directives to all departments.',
     });
 
     return results;
@@ -955,14 +734,6 @@ class StorageService {
 
   public markNotificationRead(_id: string) {}
   public markAllNotificationsRead() {}
-
-  public getProfiles() {
-    return this.getAccounts();
-  }
-
-  public getProfileByEmail(email: string) {
-    return this.getAccountByEmail(email);
-  }
 }
 
 export const storageService = new StorageService();

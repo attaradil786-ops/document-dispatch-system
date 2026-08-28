@@ -50,13 +50,13 @@ export const Header: React.FC<HeaderProps> = ({ onSearchQueryChange }) => {
 
       {/* Right Controls */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Cloud Sync Status */}
+        {/* PostgreSQL Database Sync Status */}
         <div
           className="hidden lg:flex items-center gap-1 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/40 px-2 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300"
-          title="Connected to Firebase Firestore Cloud Database"
+          title="Connected to PostgreSQL Database (dispatch_db)"
         >
           <Cloud className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 animate-pulse" />
-          <span>Cloud Active</span>
+          <span>PostgreSQL Active</span>
         </div>
 
         {/* Department Badge */}
