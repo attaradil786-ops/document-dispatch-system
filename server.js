@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import pg from 'pg';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -13,14 +14,42 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distPath = path.join(__dirname, 'dist');
+const uploadsDir = path.join(__dirname, 'uploads');
 const PORT = process.env.PORT || 3000;
+
+// Ensure local SSD storage directory (./uploads) is initialized
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('📁 Local SSD storage directory initialized at:', uploadsDir);
+}
+
+// Multer Disk Storage Configuration for local ./uploads
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    cb(null, uploadsDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = path.extname(file.originalname);
+    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+    cb(null, `${base}-${uniqueSuffix}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+});
 
 // CORS Configuration for local, Vercel, Cloudflare tunnels, and external origins
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
-  res.header('Access-Control-Expose-Headers', 'Content-Length, Content-Type');
+  res.header('Access-Control-Expose-Headers', 'Content-Length, Content-Type, Content-Disposition');
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -37,6 +66,9 @@ app.options('*', cors());
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Static serving for local uploads directory
+app.use('/uploads', express.static(uploadsDir));
 
 // PostgreSQL Connection Pool Setup
 const poolConfig = process.env.DATABASE_URL
@@ -109,6 +141,7 @@ function normalizeDocumentRow(row) {
     file_name: row.file_name || 'Document.pdf',
     file_size: row.file_size || '1.2 MB',
     file_type: row.file_type || 'PDF',
+    file_url: row.file_url || (row.file_data_url ? `/api/documents/download/${docId}` : undefined),
     comments,
     history,
     created_at: row.created_at || new Date().toISOString(),
@@ -136,27 +169,23 @@ initDatabase();
 // API ROUTES
 // ==========================================
 
-// Health Check (Probes live PostgreSQL connection)
+// Dedicated Health-Check Endpoint (Verifies PostgreSQL connection & returns status: "connected")
 app.get('/api/health', async (_req, res) => {
   try {
-    const result = await pool.query('SELECT NOW() as current_time, current_database(), current_user, version()');
+    const result = await pool.query('SELECT NOW() as current_time, current_database(), current_user');
     res.status(200).json({
       status: 'connected',
-      connected: true,
-      ok: true,
-      database: result.rows[0]?.current_database || 'dispatch_db',
+      database: 'PostgreSQL',
+      timestamp: new Date(),
+      db_name: result.rows[0]?.current_database || 'dispatch_db',
       user: result.rows[0]?.current_user || 'postgres',
-      serverTime: result.rows[0]?.current_time,
-      version: result.rows[0]?.version,
-      service: 'inter-department-document-dispatch-system',
     });
   } catch (err) {
     res.status(200).json({
       status: 'disconnected',
-      connected: false,
-      ok: false,
+      database: 'PostgreSQL',
+      timestamp: new Date(),
       error: err.message,
-      service: 'inter-department-document-dispatch-system',
     });
   }
 });
@@ -167,6 +196,7 @@ app.get('/api/db-status', async (_req, res) => {
     const result = await pool.query('SELECT NOW() as current_time, current_database(), current_user, version()');
     res.status(200).json({
       ok: true,
+      status: 'connected',
       connected: true,
       database: result.rows[0].current_database,
       user: result.rows[0].current_user,
@@ -176,9 +206,103 @@ app.get('/api/db-status', async (_req, res) => {
   } catch (err) {
     res.status(200).json({
       ok: false,
+      status: 'disconnected',
       connected: false,
       error: err.message,
     });
+  }
+});
+
+// File Upload Endpoint (Direct to local ./uploads on SSD)
+app.post('/api/documents/upload', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      const { file_name, file_data_url } = req.body;
+      if (file_data_url && file_name) {
+        const base64Data = file_data_url.replace(/^data:.*?;base64,/, '');
+        const safeName = `${Date.now()}_${file_name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const destPath = path.join(uploadsDir, safeName);
+        fs.writeFileSync(destPath, Buffer.from(base64Data, 'base64'));
+        return res.json({
+          ok: true,
+          fileName: file_name,
+          savedFileName: safeName,
+          fileUrl: `/uploads/${safeName}`,
+          downloadUrl: `/api/documents/download/${encodeURIComponent(safeName)}`,
+          size: fs.statSync(destPath).size,
+        });
+      }
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    res.json({
+      ok: true,
+      fileName: req.file.originalname,
+      savedFileName: req.file.filename,
+      fileUrl: `/uploads/${req.file.filename}`,
+      downloadUrl: `/api/documents/download/${encodeURIComponent(req.file.filename)}`,
+      size: req.file.size,
+      mimetype: req.file.mimetype,
+    });
+  } catch (err) {
+    console.error('File upload error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Alias for general file upload
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  res.json({
+    ok: true,
+    fileName: req.file.originalname,
+    savedFileName: req.file.filename,
+    fileUrl: `/uploads/${req.file.filename}`,
+    downloadUrl: `/api/documents/download/${encodeURIComponent(req.file.filename)}`,
+    size: req.file.size,
+  });
+});
+
+// File Download Endpoint (Reads directly from local ./uploads on SSD)
+app.get(['/api/documents/download/:id', '/api/documents/:id/download'], async (req, res) => {
+  const { id } = req.params;
+  try {
+    // 1. Check if id is a direct filename in ./uploads
+    const directFilePath = path.join(uploadsDir, path.basename(id));
+    if (fs.existsSync(directFilePath) && fs.statSync(directFilePath).isFile()) {
+      return res.download(directFilePath);
+    }
+
+    // 2. Query document from DB
+    const docRes = await pool.query(
+      'SELECT * FROM documents WHERE id::text = $1 OR doc_id = $1 LIMIT 1',
+      [id]
+    );
+
+    if (docRes.rows.length > 0) {
+      const doc = docRes.rows[0];
+
+      if (doc.file_url) {
+        const localName = path.basename(doc.file_url);
+        const localPath = path.join(uploadsDir, localName);
+        if (fs.existsSync(localPath)) {
+          return res.download(localPath, doc.file_name || localName);
+        }
+      }
+
+      if (doc.file_data_url) {
+        const base64Data = doc.file_data_url.replace(/^data:.*?;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        res.setHeader('Content-Disposition', `attachment; filename="${doc.file_name || 'document.pdf'}"`);
+        res.setHeader('Content-Type', doc.file_type === 'PDF' ? 'application/pdf' : 'application/octet-stream');
+        return res.send(buffer);
+      }
+    }
+
+    res.status(404).json({ error: 'File not found on local storage' });
+  } catch (err) {
+    console.error('File download error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -281,6 +405,20 @@ app.post('/api/documents', async (req, res) => {
   const effectiveRecipientDept = recipient_department || (recipient_dept_names[0] || 'Main Department');
   const effectiveRefNum = reference_number || doc_number || `REF-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
 
+  // Save file to local ./uploads directory if base64 payload provided
+  let effectiveFileUrl = file_url;
+  if (file_data_url && (!effectiveFileUrl || !effectiveFileUrl.startsWith('/uploads'))) {
+    try {
+      const base64Data = file_data_url.replace(/^data:.*?;base64,/, '');
+      const safeName = `${Date.now()}_${(file_name || 'document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const destPath = path.join(uploadsDir, safeName);
+      fs.writeFileSync(destPath, Buffer.from(base64Data, 'base64'));
+      effectiveFileUrl = `/uploads/${safeName}`;
+    } catch (err) {
+      console.warn('Could not cache file to ./uploads SSD directory:', err.message);
+    }
+  }
+
   try {
     const query = `
       INSERT INTO documents (
@@ -326,7 +464,7 @@ app.post('/api/documents', async (req, res) => {
       file_size,
       file_type,
       file_data_url,
-      file_url,
+      effectiveFileUrl,
       status,
       JSON.stringify(comments),
       JSON.stringify(history),
@@ -493,7 +631,7 @@ if (fs.existsSync(distPath)) {
   }));
 
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api/') || req.path.startsWith('/@') || req.path.includes('.')) {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/@') || req.path.includes('.')) {
       return next();
     }
     res.sendFile(path.join(distPath, 'index.html'));

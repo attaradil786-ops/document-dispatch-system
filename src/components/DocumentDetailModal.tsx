@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { DocumentItem, DocumentStatus } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { storageService } from '../services/storageService';
+import { storageService, API_BASE } from '../services/storageService';
 import {
   X,
   FileText,
@@ -177,24 +177,23 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                   </div>
                 </div>
 
-                {doc.file_data_url ? (
-                  <a
-                    href={doc.file_data_url}
-                    download={doc.file_name}
-                    className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition-colors"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Download
-                  </a>
-                ) : (
-                  <button
-                    onClick={() => alert(`Simulated downloading payload: ${doc.file_name}`)}
-                    className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition-colors"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Download File
-                  </button>
-                )}
+                <a
+                  href={
+                    doc.file_data_url ||
+                    (doc.file_url && doc.file_url.startsWith('http')
+                      ? doc.file_url
+                      : doc.file_url
+                      ? `${API_BASE}${doc.file_url}`
+                      : `${API_BASE}/api/documents/download/${doc.id}`)
+                  }
+                  download={doc.file_name || 'document.pdf'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download File
+                </a>
               </div>
             </div>
 

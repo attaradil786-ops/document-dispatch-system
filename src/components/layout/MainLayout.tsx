@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { ToastContainer } from '../common/ToastContainer';
-import { Menu, X, Database } from 'lucide-react';
+import { Menu, Database } from 'lucide-react';
 
 interface MainLayoutProps {
   activeTab: string;
@@ -11,8 +11,8 @@ interface MainLayoutProps {
   children: React.ReactNode;
 }
 
-const RAW_API_URL = (import.meta.env.VITE_API_URL as string | undefined) || '';
-export const API_BASE_URL = RAW_API_URL.trim().replace(/\/+$/, '');
+const RAW_API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:3000' : '');
+export const API_BASE = RAW_API_URL.replace(/\/+$/, '');
 
 export const MainLayout: React.FC<MainLayoutProps> = ({
   activeTab,
@@ -30,7 +30,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     let isMounted = true;
 
     const checkDatabaseHealth = async () => {
-      const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/health` : '/api/health';
+      const endpoint = API_BASE ? `${API_BASE}/api/health` : '/api/health';
       try {
         const res = await fetch(endpoint, {
           headers: { Accept: 'application/json' },
@@ -39,10 +39,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
         if (res.ok) {
           const data = await res.json();
           if (isMounted) {
-            if (data && (data.status === 'connected' || data.connected === true || data.ok === true || data.status === 'ok')) {
+            if (data && (data.status === 'connected' || data.connected === true || data.ok === true)) {
               setDbStatus({
                 connected: true,
-                database: data.database || 'dispatch_db',
+                database: data.database || data.db_name || 'PostgreSQL',
               });
             } else {
               setDbStatus({ connected: false });
@@ -50,12 +50,12 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           }
         } else {
           // Fallback probe
-          const fallbackEndpoint = API_BASE_URL ? `${API_BASE_URL}/api/db-status` : '/api/db-status';
+          const fallbackEndpoint = API_BASE ? `${API_BASE}/api/db-status` : '/api/db-status';
           const fallbackRes = await fetch(fallbackEndpoint, { cache: 'no-store' });
           if (fallbackRes.ok) {
             const fallbackData = await fallbackRes.json();
             if (isMounted && (fallbackData?.status === 'connected' || fallbackData?.connected)) {
-              setDbStatus({ connected: true, database: fallbackData.database || 'dispatch_db' });
+              setDbStatus({ connected: true, database: fallbackData.database || 'PostgreSQL' });
               return;
             }
           }
@@ -68,7 +68,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           if (fallbackRes.ok) {
             const fallbackData = await fallbackRes.json();
             if (isMounted && (fallbackData.status === 'connected' || fallbackData.connected || fallbackData.ok)) {
-              setDbStatus({ connected: true, database: fallbackData.database || 'dispatch_db' });
+              setDbStatus({ connected: true, database: fallbackData.database || 'PostgreSQL' });
               return;
             }
           }
@@ -112,7 +112,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
               onClick={() => setMobileMenuOpen(false)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600"
             >
-              <X className="h-5 w-5" />
+              ✕
             </button>
             <Sidebar
               activeTab={activeTab}
@@ -126,9 +126,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Mobile top toggle */}
-        <div className="md:hidden flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
+      <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
+        {/* Mobile Top Header */}
+        <div className="md:hidden flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
           <button
             onClick={() => setMobileMenuOpen(true)}
             className="rounded-lg p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -144,23 +144,25 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           {children}
         </main>
 
-        {/* Footer from Clean Utility design */}
-        <footer className="h-8 bg-slate-900 flex items-center justify-between px-6 shrink-0 border-t border-slate-800">
+        {/* Footer with PostgreSQL Connection Badge */}
+        <footer className="h-9 bg-slate-900 flex items-center justify-between px-6 shrink-0 border-t border-slate-800">
           <div className="text-[10px] text-slate-400">
             © 2026 College Management Information Systems. All rights reserved.
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5" title={dbStatus.connected ? 'Live connection to PostgreSQL Database' : 'Database Disconnected'}>
               <div
-                className={`w-1.5 h-1.5 rounded-full ${
+                className={`w-2 h-2 rounded-full ${
                   dbStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
                 }`}
               ></div>
-              <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                <Database className="h-3 w-3 inline text-slate-400" />
-                {dbStatus.connected
-                  ? `PostgreSQL: Connected (${dbStatus.database || 'dispatch_db'})`
-                  : 'PostgreSQL: Disconnected'}
+              <span
+                className={`text-[10px] font-semibold flex items-center gap-1 ${
+                  dbStatus.connected ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                <Database className="h-3 w-3 inline" />
+                {dbStatus.connected ? 'PostgreSQL: Connected' : 'PostgreSQL: Disconnected'}
               </span>
             </div>
             <div className="text-[10px] text-slate-400">System V: 2.5.0</div>
@@ -172,4 +174,3 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     </div>
   );
 };
-

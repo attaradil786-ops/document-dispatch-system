@@ -88,6 +88,7 @@ export interface DocumentItem {
   file_size: string;
   file_type: string; // 'PDF' | 'DOCX' | 'XLSX' | 'PNG' | 'ZIP'
   file_data_url?: string;
+  file_url?: string;
   status: DocumentStatus;
   created_at: string;
   updated_at: string;

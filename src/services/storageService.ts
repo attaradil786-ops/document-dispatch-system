@@ -223,8 +223,9 @@ const SEED_ACCOUNTS: UserAccount[] = [
   },
 ];
 
-const RAW_API_URL = (import.meta.env.VITE_API_URL as string | undefined) || '';
-export const API_BASE_URL = RAW_API_URL.trim().replace(/\/+$/, '');
+const RAW_API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:3000' : '');
+export const API_BASE = RAW_API_URL.replace(/\/+$/, '');
+export const API_BASE_URL = API_BASE;
 
 type ListenerCallback = () => void;
 
