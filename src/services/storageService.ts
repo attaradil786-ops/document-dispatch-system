@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   DOCUMENTS: 'DISPATCH_DOCUMENTS_PG',
 };
 
-// Default Fallback Seed Departments (Central HQ & Criteria 1 through Criteria 7)
+// Default Fallback Seed Departments
 const SEED_DEPARTMENTS: Department[] = [
   {
     id: 'main-dept',
@@ -223,7 +223,11 @@ const SEED_ACCOUNTS: UserAccount[] = [
   },
 ];
 
-const RAW_API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:3000' : '');
+const RAW_API_URL =
+  (import.meta.env.VITE_API_URL as string | undefined)?.trim() ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:3000'
+    : '');
 export const API_BASE = RAW_API_URL.replace(/\/+$/, '');
 export const API_BASE_URL = API_BASE;
 
@@ -292,58 +296,70 @@ class StorageService {
   }
 
   // --- Real-time Periodic Polling with PostgreSQL ---
-  private async fetchRemoteData() {
+  public async fetchRemoteData() {
     try {
-      // 1. Fetch Documents
-      const docRes = await fetch(`${API_BASE_URL}/api/documents`, {
+      const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/documents` : '/api/documents';
+      const docRes = await fetch(endpoint, {
         headers: {
+          'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true',
         },
       });
+
       if (docRes.ok) {
         const remoteDocs: any[] = await docRes.json();
-        const normalizedDocs: DocumentItem[] = remoteDocs.map((d) => ({
-          ...d,
-          recipient_dept_ids: typeof d.recipient_dept_ids === 'string' ? JSON.parse(d.recipient_dept_ids) : d.recipient_dept_ids || [],
-          recipient_dept_names: typeof d.recipient_dept_names === 'string' ? JSON.parse(d.recipient_dept_names) : d.recipient_dept_names || [],
-          comments: typeof d.comments === 'string' ? JSON.parse(d.comments) : d.comments || [],
-          history: typeof d.history === 'string' ? JSON.parse(d.history) : d.history || [],
-        }));
+        if (Array.isArray(remoteDocs)) {
+          const normalizedDocs: DocumentItem[] = remoteDocs.map((d) => ({
+            ...d,
+            recipient_dept_ids:
+              typeof d.recipient_dept_ids === 'string'
+                ? JSON.parse(d.recipient_dept_ids)
+                : d.recipient_dept_ids || [],
+            recipient_dept_names:
+              typeof d.recipient_dept_names === 'string'
+                ? JSON.parse(d.recipient_dept_names)
+                : d.recipient_dept_names || [],
+            comments:
+              typeof d.comments === 'string' ? JSON.parse(d.comments) : d.comments || [],
+            history:
+              typeof d.history === 'string' ? JSON.parse(d.history) : d.history || [],
+          }));
 
-        this.saveDocumentsLocally(normalizedDocs);
-        this.isPostgreConnected = true;
-        this.notify();
+          this.saveDocumentsLocally(normalizedDocs);
+          this.isPostgreConnected = true;
+          this.notify();
+        }
       }
 
-      // 2. Fetch Departments
-      const deptRes = await fetch(`${API_BASE_URL}/api/departments`, {
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-        },
-      });
+      // Departments & Accounts Sync
+      const deptRes = await fetch(
+        API_BASE_URL ? `${API_BASE_URL}/api/departments` : '/api/departments',
+        {
+          headers: { 'ngrok-skip-browser-warning': 'true' },
+        }
+      );
       if (deptRes.ok) {
         const remoteDepts: Department[] = await deptRes.json();
-        if (remoteDepts.length > 0) {
+        if (Array.isArray(remoteDepts) && remoteDepts.length > 0) {
           localStorage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify(remoteDepts));
           this.notify();
         }
       }
 
-      // 3. Fetch Accounts
-      const accRes = await fetch(`${API_BASE_URL}/api/accounts`, {
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-        },
-      });
+      const accRes = await fetch(
+        API_BASE_URL ? `${API_BASE_URL}/api/accounts` : '/api/accounts',
+        {
+          headers: { 'ngrok-skip-browser-warning': 'true' },
+        }
+      );
       if (accRes.ok) {
         const remoteAccs: UserAccount[] = await accRes.json();
-        if (remoteAccs.length > 0) {
+        if (Array.isArray(remoteAccs) && remoteAccs.length > 0) {
           localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(remoteAccs));
           this.notify();
         }
       }
     } catch (err) {
-      // Offline or local development fallback
       console.warn('Backend PostgreSQL synchronization check:', err);
     }
   }
@@ -352,7 +368,7 @@ class StorageService {
     if (this.syncTimer) clearInterval(this.syncTimer);
     this.syncTimer = setInterval(() => {
       this.fetchRemoteData();
-    }, 5000);
+    }, 4000);
   }
 
   // --- Departments ---
@@ -397,7 +413,7 @@ class StorageService {
     );
   }
 
-  // --- Documents & Strict Routing Security ---
+  // --- Documents ---
   public getAllDocuments(): DocumentItem[] {
     this.initLocalStorage();
     try {
@@ -415,15 +431,16 @@ class StorageService {
 
     return allDocs.filter((doc) => {
       const isSender = doc.sender_dept_id === userDeptId;
-      const isDirectRecipient = doc.recipient_dept_ids && doc.recipient_dept_ids.includes(userDeptId);
-      const isBroadcastToAll = doc.is_sent_to_all;
+      const isDirectRecipient =
+        Array.isArray(doc.recipient_dept_ids) && doc.recipient_dept_ids.includes(userDeptId);
+      const isBroadcastToAll = Boolean(doc.is_sent_to_all);
 
       return isSender || isDirectRecipient || isBroadcastToAll;
     });
   }
 
   // --- Add / Dispatch New Document ---
-  public addDocument(
+  public async addDocument(
     data: {
       title: string;
       description: string;
@@ -439,7 +456,7 @@ class StorageService {
       fileDataUrl?: string;
     },
     senderUser: UserAccount
-  ): DocumentItem {
+  ): Promise<DocumentItem> {
     const allDocs = this.getAllDocuments();
     const depts = this.getDepartments();
 
@@ -466,19 +483,20 @@ class StorageService {
 
     const deptCode = senderUser.is_main_dept
       ? 'MAIN'
-      : senderUser.department_id.replace('dept-', '').toUpperCase();
+      : (senderUser.department_id || 'DEPT').replace('dept-', '').toUpperCase();
     const docNum = `DOC-${new Date().getFullYear()}-${deptCode}-${String(allDocs.length + 1).padStart(3, '0')}`;
+    const newDocId = `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
     const newDoc: DocumentItem = {
-      id: 'doc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      id: newDocId,
       doc_number: docNum,
       title: data.title,
-      description: data.description,
+      description: data.description || '',
       category: data.category,
       priority: data.priority,
-      sub_criteria: data.subCriteria,
-      is_personal_hq_dispatch: data.isPersonalHqDispatch,
-      personal_dispatch_note: data.personalDispatchNote,
+      sub_criteria: data.subCriteria || '1.1',
+      is_personal_hq_dispatch: Boolean(data.isPersonalHqDispatch),
+      personal_dispatch_note: data.personalDispatchNote || '',
       sender_dept_id: senderUser.department_id,
       sender_dept_name: senderUser.department_name,
       sender_user_id: senderUser.id,
@@ -489,14 +507,14 @@ class StorageService {
       file_name: data.fileName || 'Document.pdf',
       file_size: data.fileSize || '1.5 MB',
       file_type: data.fileType || 'PDF',
-      file_data_url: data.fileDataUrl,
+      file_data_url: data.fileDataUrl || undefined,
       status: 'Dispatched',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       comments: [
         {
-          id: 'comment-' + Date.now(),
-          doc_id: 'doc-' + Date.now(),
+          id: `comment-${Date.now()}`,
+          doc_id: newDocId,
           sender_dept_id: senderUser.department_id,
           sender_dept_name: senderUser.department_name,
           author_name: senderUser.full_name,
@@ -506,8 +524,8 @@ class StorageService {
       ],
       history: [
         {
-          id: 'hist-' + Date.now(),
-          doc_id: 'doc-' + Date.now(),
+          id: `hist-${Date.now()}`,
+          doc_id: newDocId,
           action: senderUser.is_main_dept
             ? `Dispatched by Main Dept to ${isSentToAll ? 'ALL Sub-Departments' : finalTargetNames.join(', ')}`
             : `Uploaded by ${senderUser.department_name} to Main Department`,
@@ -518,40 +536,40 @@ class StorageService {
       ],
     };
 
-    // 1. Optimistic Local Update
+    // 1. Instant local persistence & UI update
     allDocs.unshift(newDoc);
     this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    // 2. Persist to PostgreSQL via REST API
-    fetch(`${API_BASE_URL}/api/documents`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
-      },
-      body: JSON.stringify(newDoc),
-    })
-      .then((res) => res.json())
-      .then((saved) => {
-        if (saved && saved.id) {
-          this.fetchRemoteData();
-        }
-      })
-      .catch((err) => {
-        console.warn('PostgreSQL API dispatch synchronization notice:', err);
+    // 2. Persist to PostgreSQL Server
+    try {
+      const endpoint = API_BASE_URL ? `${API_BASE_URL}/api/documents` : '/api/documents';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify(newDoc),
       });
+
+      if (res.ok) {
+        this.fetchRemoteData();
+      }
+    } catch (err) {
+      console.warn('Database save warning:', err);
+    }
 
     return newDoc;
   }
 
   // --- Update Document Status ---
-  public updateDocumentStatus(
+  public async updateDocumentStatus(
     docId: string,
     newStatus: DocumentItem['status'],
     user: UserAccount,
     remark?: string
-  ): DocumentItem | null {
+  ): Promise<DocumentItem | null> {
     const allDocs = this.getAllDocuments();
     const index = allDocs.findIndex((d) => d.id === docId);
     if (index === -1) return null;
@@ -561,7 +579,7 @@ class StorageService {
     docItem.updated_at = new Date().toISOString();
 
     docItem.history.unshift({
-      id: 'hist-' + Date.now(),
+      id: `hist-${Date.now()}`,
       doc_id: docId,
       action: `Status updated to "${newStatus}"${remark ? `: ${remark}` : ''}`,
       performed_by: user.full_name,
@@ -571,7 +589,7 @@ class StorageService {
 
     if (remark) {
       docItem.comments.push({
-        id: 'comment-' + Date.now(),
+        id: `comment-${Date.now()}`,
         doc_id: docId,
         sender_dept_id: user.department_id,
         sender_dept_name: user.department_name,
@@ -585,36 +603,46 @@ class StorageService {
     this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    // Persist status to PostgreSQL API
-    fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/status`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
-      },
-      body: JSON.stringify({
-        status: newStatus,
-        remark,
-        user_name: user.full_name,
-        dept_name: user.department_name,
-        sender_dept_id: user.department_id,
-      }),
-    })
-      .then(() => this.fetchRemoteData())
-      .catch((err) => console.warn('Status update sync notice:', err));
+    try {
+      const endpoint = API_BASE_URL
+        ? `${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/status`
+        : `/api/documents/${encodeURIComponent(docId)}/status`;
+
+      await fetch(endpoint, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          remark,
+          user_name: user.full_name,
+          dept_name: user.department_name,
+          sender_dept_id: user.department_id,
+        }),
+      });
+      this.fetchRemoteData();
+    } catch (err) {
+      console.warn('Status update sync notice:', err);
+    }
 
     return docItem;
   }
 
   // --- Add Comment / Response ---
-  public addComment(docId: string, message: string, user: UserAccount): DocumentItem | null {
+  public async addComment(
+    docId: string,
+    message: string,
+    user: UserAccount
+  ): Promise<DocumentItem | null> {
     const allDocs = this.getAllDocuments();
     const index = allDocs.findIndex((d) => d.id === docId);
     if (index === -1) return null;
 
     const docItem = allDocs[index];
     docItem.comments.push({
-      id: 'comment-' + Date.now(),
+      id: `comment-${Date.now()}`,
       doc_id: docId,
       sender_dept_id: user.department_id,
       sender_dept_name: user.department_name,
@@ -628,41 +656,54 @@ class StorageService {
     this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    // Persist comment to PostgreSQL API
-    fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/comments`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
-      },
-      body: JSON.stringify({
-        message,
-        author_name: user.full_name,
-        sender_dept_id: user.department_id,
-        sender_dept_name: user.department_name,
-      }),
-    })
-      .then(() => this.fetchRemoteData())
-      .catch((err) => console.warn('Comment sync notice:', err));
+    try {
+      const endpoint = API_BASE_URL
+        ? `${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/comments`
+        : `/api/documents/${encodeURIComponent(docId)}/comments`;
+
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({
+          message,
+          author_name: user.full_name,
+          sender_dept_id: user.department_id,
+          sender_dept_name: user.department_name,
+        }),
+      });
+      this.fetchRemoteData();
+    } catch (err) {
+      console.warn('Comment sync notice:', err);
+    }
 
     return docItem;
   }
 
   // --- Delete Document ---
-  public deleteDocument(docId: string): boolean {
+  public async deleteDocument(docId: string): Promise<boolean> {
     let allDocs = this.getAllDocuments();
     allDocs = allDocs.filter((d) => d.id !== docId);
     this.saveDocumentsLocally(allDocs);
     this.notify();
 
-    fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}`, {
-      method: 'DELETE',
-      headers: {
-        'ngrok-skip-browser-warning': 'true',
-      },
-    })
-      .then(() => this.fetchRemoteData())
-      .catch((err) => console.warn('Delete sync notice:', err));
+    try {
+      const endpoint = API_BASE_URL
+        ? `${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}`
+        : `/api/documents/${encodeURIComponent(docId)}`;
+
+      await fetch(endpoint, {
+        method: 'DELETE',
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
+      this.fetchRemoteData();
+    } catch (err) {
+      console.warn('Delete sync notice:', err);
+    }
 
     return true;
   }
@@ -674,7 +715,9 @@ class StorageService {
     return {
       totalDispatched: userDocs.length,
       receivedCount: userDocs.filter(
-        (d) => (d.recipient_dept_ids && d.recipient_dept_ids.includes(userDeptId)) || (d.is_sent_to_all && !isMainDept)
+        (d) =>
+          (Array.isArray(d.recipient_dept_ids) && d.recipient_dept_ids.includes(userDeptId)) ||
+          (d.is_sent_to_all && !isMainDept)
       ).length,
       pendingCount: userDocs.filter(
         (d) => d.status === 'Dispatched' || d.status === 'Under Review'
@@ -690,19 +733,16 @@ class StorageService {
     const allDocs = this.getAllDocuments();
     const results: SecurityAuditResult[] = [];
 
-    // Test 1: Sub-department data isolation assertion
     const c1User = this.getAccountByEmail('criteria1@college.edu') || SEED_ACCOUNTS[1];
     const c2DocsForC1 = allDocs.filter(
       (d) =>
         d.sender_dept_id === 'dept-c2' &&
-        !(d.recipient_dept_ids && d.recipient_dept_ids.includes('dept-c1')) &&
+        !(Array.isArray(d.recipient_dept_ids) && d.recipient_dept_ids.includes('dept-c1')) &&
         !d.is_sent_to_all
     );
 
     const c1VisibleDocs = this.getDocumentsForUser(c1User.department_id, c1User.is_main_dept);
-    const leakedC2Doc = c1VisibleDocs.find((d) =>
-      c2DocsForC1.some((m) => m.id === d.id)
-    );
+    const leakedC2Doc = c1VisibleDocs.find((d) => c2DocsForC1.some((m) => m.id === d.id));
 
     results.push({
       test_name: 'Sub-Department Data Isolation Assertion',
@@ -717,7 +757,6 @@ class StorageService {
         : 'PASS: Criteria 1 token strictly blocked from seeing Criteria 2 private uploads.',
     });
 
-    // Test 2: Sub-department upload lock rule
     results.push({
       test_name: 'Sub-Department Target Restriction Enforcement',
       user_dept: 'Criteria 2 (dept-c2)',
@@ -729,7 +768,6 @@ class StorageService {
       message: 'PASS: Criteria 2 uploads are automatically routed exclusively to Main Department.',
     });
 
-    // Test 3: Main Department Global Query Rule
     const mainUser = this.getAccountByEmail('main@college.edu') || SEED_ACCOUNTS[0];
     const mainDocsCount = this.getDocumentsForUser(mainUser.department_id, mainUser.is_main_dept).length;
 
@@ -747,7 +785,6 @@ class StorageService {
     return results;
   }
 
-  // Notification Helpers
   public getNotifications(_role?: string, _deptId?: string) {
     const docs = this.getAllDocuments();
     return docs.slice(0, 5).map((d) => ({
@@ -756,7 +793,10 @@ class StorageService {
       message: `From ${d.sender_dept_name} • Status: ${d.status}`,
       type: 'notice' as const,
       is_read: false,
-      created_at: new Date(d.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      created_at: new Date(d.created_at).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
     }));
   }
 
