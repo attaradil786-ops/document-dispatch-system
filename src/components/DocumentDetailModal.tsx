@@ -8,13 +8,10 @@ import {
   X,
   FileText,
   Clock,
-  User,
   Building2,
   Send,
   Download,
   ExternalLink,
-  CheckCircle2,
-  AlertCircle,
   ShieldCheck,
   MessageSquare,
   FileCheck,
@@ -22,6 +19,8 @@ import {
   Eye,
   EyeOff,
   Maximize2,
+  Code,
+  Sparkles,
 } from 'lucide-react';
 
 interface DocumentDetailModalProps {
@@ -40,20 +39,59 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
   const [selectedStatus, setSelectedStatus] = useState<DocumentStatus | ''>('');
   const [statusRemark, setStatusRemark] = useState('');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
-  const [showInlinePreview, setShowInlinePreview] = useState(false);
+  const [showInlinePreview, setShowInlinePreview] = useState(true);
+  const [previewMode, setPreviewMode] = useState<'pdf' | 'text'>('pdf');
+
+  // Decode text payload if the uploaded file is text or code
+  const textContent = useMemo(() => {
+    if (!doc?.file_data_url) return '';
+    try {
+      const parts = doc.file_data_url.split(',');
+      if (parts.length < 2) return '';
+      const decoded = atob(parts[1]);
+      // Check if it looks like plain text / code (not binary garbage)
+      if (/^[\x20-\x7E\r\n\t]+$/.test(decoded.slice(0, 1000))) {
+        return decoded;
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  }, [doc?.file_data_url]);
+
+  // Determine whether payload is a real binary PDF starting with %PDF-
+  const isBinaryPdf = useMemo(() => {
+    if (!doc?.file_data_url) return true;
+    try {
+      const parts = doc.file_data_url.split(',');
+      if (parts.length < 2) return false;
+      const sample = atob(parts[1].slice(0, 32));
+      return sample.startsWith('%PDF-');
+    } catch {
+      return false;
+    }
+  }, [doc?.file_data_url]);
 
   // Helper to convert base64 data URL to a safe Blob URL
   const getBlobUrlFromDataUrl = (dataUrl: string): string => {
     try {
-      const arr = dataUrl.split(',');
-      const mime = arr[0].match(/:(.*?);/)?.[1] || 'application/pdf';
-      const bstr = atob(arr[1]);
-      let n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      while (n--) {
-        u8arr[n] = bstr.charCodeAt(n);
+      const parts = dataUrl.split(',');
+      if (parts.length < 2) return dataUrl;
+      const mimeMatch = parts[0].match(/:(.*?);/);
+      let mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+      const byteString = atob(parts[1]);
+
+      // If it's text content but labeled as PDF, use text/plain for blob preview
+      if (!byteString.startsWith('%PDF-') && /^[\x20-\x7E\r\n\t]+$/.test(byteString.slice(0, 500))) {
+        mime = 'text/plain;charset=utf-8';
       }
-      const blob = new Blob([u8arr], { type: mime });
+
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      const blob = new Blob([ab], { type: mime });
       return URL.createObjectURL(blob);
     } catch (e) {
       console.error('Error creating blob from data url:', e);
@@ -61,11 +99,11 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
     }
   };
 
-  // Helper to generate official dispatch record PDF on the fly
+  // Helper to generate a 100% valid official institutional PDF
   const generateOfficialPdfBlob = (d: DocumentItem): Blob => {
     const pdf = new jsPDF();
 
-    // Header bar
+    // Header styling
     pdf.setFillColor(30, 58, 138); // blue-900
     pdf.rect(0, 0, 210, 32, 'F');
 
@@ -76,7 +114,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
 
     pdf.setFontSize(9);
     pdf.setFont('helvetica', 'normal');
-    pdf.text('Official Institutional Dispatch Record & Verification Sheet', 14, 23);
+    pdf.text('Official Institutional Dispatch Record & Administrative Sheet', 14, 23);
 
     // Document Title
     pdf.setTextColor(15, 23, 42);
@@ -120,15 +158,35 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
     );
     pdf.text(splitDescription, 14, lastY + 18);
 
+    let currentY = lastY + 18 + splitDescription.length * 6;
+
     if (d.personal_dispatch_note) {
-      const noteY = lastY + 18 + splitDescription.length * 6 + 8;
+      currentY += 8;
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(109, 40, 217);
-      pdf.text('⚡ Personal HQ Directive / Sub-Criteria Instructions:', 14, noteY);
+      pdf.text('⚡ Personal HQ Directive / Sub-Criteria Instructions:', 14, currentY);
       pdf.setFont('helvetica', 'normal');
       pdf.setTextColor(15, 23, 42);
       const splitNote = pdf.splitTextToSize(d.personal_dispatch_note, 180);
-      pdf.text(splitNote, 14, noteY + 8);
+      pdf.text(splitNote, 14, currentY + 8);
+      currentY += splitNote.length * 6 + 8;
+    }
+
+    // If attached content is text, append it into the PDF body
+    if (textContent) {
+      currentY += 8;
+      if (currentY > 250) {
+        pdf.addPage();
+        currentY = 20;
+      }
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(30, 58, 138);
+      pdf.text(`Attached Payload Content (${d.file_name || 'Document Content'}):`, 14, currentY);
+      pdf.setFont('courier', 'normal');
+      pdf.setFontSize(8.5);
+      pdf.setTextColor(30, 41, 59);
+      const splitAttached = pdf.splitTextToSize(textContent.slice(0, 4000), 180);
+      pdf.text(splitAttached, 14, currentY + 7);
     }
 
     return pdf.output('blob');
@@ -137,36 +195,44 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
   // Safe file preview URL resolution
   const resolvedFileUrl = useMemo(() => {
     if (!doc) return '';
+    // If it's a real binary PDF or image, use safe blob URL
+    if (doc.file_data_url && doc.file_data_url.startsWith('data:')) {
+      if (isBinaryPdf || !textContent) {
+        return getBlobUrlFromDataUrl(doc.file_data_url);
+      }
+      // If text content was uploaded as .pdf, generate valid official PDF blob
+      const pdfBlob = generateOfficialPdfBlob(doc);
+      return URL.createObjectURL(pdfBlob);
+    }
     if (doc.file_url) {
       return doc.file_url.startsWith('http')
         ? doc.file_url
-        : `${API_BASE || 'http://localhost:3000'}${doc.file_url}`;
+        : `${API_BASE || ''}${doc.file_url}`;
     }
-    if (doc.file_data_url) {
-      return getBlobUrlFromDataUrl(doc.file_data_url);
-    }
-    return '';
-  }, [doc]);
+    // Fallback: generate official PDF blob
+    const pdfBlob = generateOfficialPdfBlob(doc);
+    return URL.createObjectURL(pdfBlob);
+  }, [doc, isBinaryPdf, textContent]);
 
   if (!doc) return null;
 
   // Open Document in New Tab
   const handleOpenFile = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (doc.file_url) {
-      const targetUrl = doc.file_url.startsWith('http')
-        ? doc.file_url
-        : `${API_BASE || 'http://localhost:3000'}${doc.file_url}`;
-      window.open(targetUrl, '_blank');
-      return;
-    }
-    if (doc.file_data_url) {
+    if (doc.file_data_url && doc.file_data_url.startsWith('data:') && isBinaryPdf) {
       const blobUrl = getBlobUrlFromDataUrl(doc.file_data_url);
       window.open(blobUrl, '_blank');
       return;
     }
+    if (doc.file_url && isBinaryPdf) {
+      const targetUrl = doc.file_url.startsWith('http')
+        ? doc.file_url
+        : `${API_BASE || ''}${doc.file_url}`;
+      window.open(targetUrl, '_blank');
+      return;
+    }
 
-    // Text-only dispatch: generate and open official dispatch PDF
+    // Generate guaranteed valid PDF and open in new tab
     const pdfBlob = generateOfficialPdfBlob(doc);
     const pdfUrl = URL.createObjectURL(pdfBlob);
     window.open(pdfUrl, '_blank');
@@ -175,23 +241,11 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
   // Download Document
   const handleDownloadFile = (e: React.MouseEvent) => {
     e.preventDefault();
-    const downloadName = doc.file_name || `${(doc.title || 'document').replace(/\s+/g, '_')}.pdf`;
+    const downloadName = doc.file_name?.endsWith('.pdf')
+      ? doc.file_name
+      : `${(doc.title || 'document').replace(/\s+/g, '_')}.pdf`;
 
-    if (doc.file_url) {
-      const targetUrl = doc.file_url.startsWith('http')
-        ? doc.file_url
-        : `${API_BASE || 'http://localhost:3000'}${doc.file_url}`;
-      const link = document.createElement('a');
-      link.href = targetUrl;
-      link.download = downloadName;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      return;
-    }
-
-    if (doc.file_data_url) {
+    if (doc.file_data_url && doc.file_data_url.startsWith('data:') && isBinaryPdf) {
       const blobUrl = getBlobUrlFromDataUrl(doc.file_data_url);
       const link = document.createElement('a');
       link.href = blobUrl;
@@ -202,7 +256,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
       return;
     }
 
-    // Text-only dispatch: generate official PDF and download
+    // Generate guaranteed valid official PDF
     const pdfBlob = generateOfficialPdfBlob(doc);
     const pdfUrl = URL.createObjectURL(pdfBlob);
     const link = document.createElement('a');
@@ -265,9 +319,6 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
     doc.file_type?.toUpperCase() === 'JPEG' ||
     doc.file_type?.toUpperCase() === 'WEBP' ||
     doc.file_name?.match(/\.(png|jpg|jpeg|webp)$/i);
-
-  const isPdfFile =
-    doc.file_type?.toUpperCase() === 'PDF' || doc.file_name?.match(/\.pdf$/i) || !doc.file_type;
 
   const canChangeStatus =
     isMainDept || (Array.isArray(doc.recipient_dept_ids) && doc.recipient_dept_ids.includes(user?.department_id || ''));
@@ -357,7 +408,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                       {doc.file_name || `${doc.title}.pdf`}
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      {doc.file_size || 'Verified'} • Official Document File Payload
+                      {doc.file_size || 'Verified'} • Official Institutional Dispatch
                     </p>
                   </div>
                 </div>
@@ -390,51 +441,85 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                     className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
                   >
                     <Download className="h-3.5 w-3.5" />
-                    <span>Download</span>
+                    <span>Download PDF</span>
                   </button>
                 </div>
               </div>
 
               {/* Inline Document Preview Box */}
               {showInlinePreview && (
-                <div className="pt-3 border-t border-blue-200/60 dark:border-blue-900/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                      <Eye className="h-3.5 w-3.5 text-blue-600" />
-                      Document Inline Viewer
-                    </span>
+                <div className="pt-3 border-t border-blue-200/60 dark:border-blue-900/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        <Eye className="h-3.5 w-3.5 text-blue-600" />
+                        Document Reader
+                      </span>
+                      {textContent && (
+                        <div className="flex items-center rounded-lg bg-slate-200 dark:bg-slate-800 p-0.5 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewMode('pdf')}
+                            className={`px-2 py-0.5 rounded-md ${
+                              previewMode === 'pdf' ? 'bg-white dark:bg-slate-900 shadow-xs text-blue-600' : 'text-slate-500'
+                            }`}
+                          >
+                            Official PDF
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewMode('text')}
+                            className={`px-2 py-0.5 rounded-md ${
+                              previewMode === 'text' ? 'bg-white dark:bg-slate-900 shadow-xs text-blue-600' : 'text-slate-500'
+                            }`}
+                          >
+                            Raw Content
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     <button
                       type="button"
                       onClick={handleOpenFile}
-                      className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1"
+                      className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
                     >
-                      <Maximize2 className="h-3 w-3" /> Fullscreen Tab
+                      <Maximize2 className="h-3 w-3" /> Fullscreen View
                     </button>
                   </div>
 
-                  {isImageFile && resolvedFileUrl ? (
-                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black/5 flex items-center justify-center p-2">
+                  {previewMode === 'text' && textContent ? (
+                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 p-4 max-h-[460px] overflow-y-auto font-mono text-xs text-emerald-400 whitespace-pre-wrap">
+                      {textContent}
+                    </div>
+                  ) : isImageFile && resolvedFileUrl ? (
+                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/5 flex items-center justify-center p-3">
                       <img
                         src={resolvedFileUrl}
                         alt={doc.title}
-                        className="max-h-96 object-contain rounded-lg shadow-sm"
+                        className="max-h-[480px] w-auto object-contain rounded-lg shadow-sm"
                       />
                     </div>
                   ) : resolvedFileUrl ? (
-                    <iframe
-                      src={resolvedFileUrl}
-                      title={doc.title}
-                      className="w-full h-96 rounded-xl border border-slate-200 dark:border-slate-800 bg-white"
-                    />
+                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 shadow-inner">
+                      <iframe
+                        src={`${resolvedFileUrl}#toolbar=1&navpanes=0`}
+                        title={doc.title}
+                        className="w-full h-[480px] rounded-xl border-0 bg-white"
+                      />
+                    </div>
                   ) : (
-                    <div className="p-6 text-center text-xs text-slate-500 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
-                      <p className="font-semibold">Official Dispatch Metadata Record</p>
+                    <div className="p-6 text-center text-xs text-slate-500 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                      <p className="font-bold text-slate-800 dark:text-slate-200">
+                        Official Administrative Dispatch Record
+                      </p>
                       <button
                         type="button"
                         onClick={handleOpenFile}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-xs"
+                        className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-md hover:bg-blue-700 transition-colors cursor-pointer inline-flex items-center gap-1.5"
                       >
-                        Generate & Open Official Document PDF
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span>Generate & View Official Document PDF</span>
                       </button>
                     </div>
                   )}
