@@ -63,6 +63,30 @@ app.use(
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+app.get('/uploads/:filename', (req, res, next) => {
+  const filePath = path.join(uploadsDir, path.basename(req.params.filename));
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('File not found');
+  }
+
+  const fileBuffer = fs.readFileSync(filePath);
+  const isPdfExt = req.params.filename.toLowerCase().endsWith('.pdf');
+
+  if (isPdfExt) {
+    const isRealPdf = fileBuffer.slice(0, 5).toString('ascii').startsWith('%PDF-');
+    if (!isRealPdf) {
+      // It's a text/code file uploaded with .pdf extension!
+      // Serving as text/plain prevents Chrome's PDF viewer from crashing with "Failed to load PDF document"
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.send(fileBuffer);
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    return res.sendFile(filePath);
+  }
+
+  res.sendFile(filePath);
+});
 app.use('/uploads', express.static(uploadsDir));
 
 // PostgreSQL Database Connection Pool
