@@ -33,13 +33,23 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       const endpoint = API_BASE ? `${API_BASE}/api/health` : '/api/health';
       try {
         const res = await fetch(endpoint, {
-          headers: { Accept: 'application/json' },
+          headers: {
+            Accept: 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
           cache: 'no-store',
         });
         if (res.ok) {
           const data = await res.json();
           if (isMounted) {
-            if (data && (data.status === 'connected' || data.connected === true || data.ok === true)) {
+            if (
+              data &&
+              (data.status === 'online' ||
+                data.status === 'connected' ||
+                data.database === 'connected' ||
+                data.connected === true ||
+                data.ok === true)
+            ) {
               setDbStatus({
                 connected: true,
                 database: data.database || data.db_name || 'PostgreSQL',
@@ -51,7 +61,12 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
         } else {
           // Fallback probe
           const fallbackEndpoint = API_BASE ? `${API_BASE}/api/db-status` : '/api/db-status';
-          const fallbackRes = await fetch(fallbackEndpoint, { cache: 'no-store' });
+          const fallbackRes = await fetch(fallbackEndpoint, {
+            headers: {
+              'ngrok-skip-browser-warning': 'true',
+            },
+            cache: 'no-store',
+          });
           if (fallbackRes.ok) {
             const fallbackData = await fallbackRes.json();
             if (isMounted && (fallbackData?.status === 'connected' || fallbackData?.connected)) {
@@ -64,10 +79,22 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       } catch (err) {
         // Fallback retry with relative endpoint if cross-origin failed
         try {
-          const fallbackRes = await fetch('/api/health', { cache: 'no-store' });
+          const fallbackRes = await fetch('/api/health', {
+            headers: {
+              'ngrok-skip-browser-warning': 'true',
+            },
+            cache: 'no-store',
+          });
           if (fallbackRes.ok) {
             const fallbackData = await fallbackRes.json();
-            if (isMounted && (fallbackData.status === 'connected' || fallbackData.connected || fallbackData.ok)) {
+            if (
+              isMounted &&
+              (fallbackData.status === 'online' ||
+                fallbackData.status === 'connected' ||
+                fallbackData.database === 'connected' ||
+                fallbackData.connected ||
+                fallbackData.ok)
+            ) {
               setDbStatus({ connected: true, database: fallbackData.database || 'PostgreSQL' });
               return;
             }
@@ -150,16 +177,17 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
             © 2026 College Management Information Systems. All rights reserved.
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5" title={dbStatus.connected ? 'Live connection to PostgreSQL Database' : 'Database Disconnected'}>
+            <div
+              className="flex items-center gap-1.5"
+              title={dbStatus.connected ? 'Live connection to PostgreSQL Database' : 'Database Disconnected'}
+            >
               <div
-                className={`w-2 h-2 rounded-full ${
-                  dbStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
-                }`}
+                className={`w-2 h-2 rounded-full ${dbStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                  }`}
               ></div>
               <span
-                className={`text-[10px] font-semibold flex items-center gap-1 ${
-                  dbStatus.connected ? 'text-emerald-400' : 'text-rose-400'
-                }`}
+                className={`text-[10px] font-semibold flex items-center gap-1 ${dbStatus.connected ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
               >
                 <Database className="h-3 w-3 inline" />
                 {dbStatus.connected ? 'PostgreSQL: Connected' : 'PostgreSQL: Disconnected'}
