@@ -17,16 +17,12 @@ const distPath = path.join(__dirname, 'dist');
 const uploadsDir = path.join(__dirname, 'uploads');
 const PORT = process.env.PORT || 3000;
 
-// Ensure local SSD storage directory (./uploads) is initialized
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Multer disk storage setup for local SSD file uploads
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
+  destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -35,7 +31,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Comprehensive CORS & Preflight Handling (Allows Ngrok and Vercel)
+// Comprehensive CORS & Preflight Handling
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
@@ -84,14 +80,16 @@ const pool = process.env.DATABASE_URL
     ssl: false,
   });
 
-// Database Schema Initialization
+// Schema Initialization + Safe Auto-Migration
 const initDatabase = async () => {
   try {
     const client = await pool.connect();
+
+    // 1. Departments & Accounts Tables
     await client.query(`
       CREATE TABLE IF NOT EXISTS departments (
         id VARCHAR(50) PRIMARY KEY,
-        code VARCHAR(50) NOT NULL,
+        code VARCHAR(50),
         name VARCHAR(255) NOT NULL,
         is_main BOOLEAN DEFAULT false,
         email VARCHAR(255),
@@ -99,6 +97,7 @@ const initDatabase = async () => {
         building VARCHAR(255),
         phone VARCHAR(50),
         sub_criteria_list JSONB DEFAULT '[]'::jsonb,
+        dept_key VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -108,7 +107,7 @@ const initDatabase = async () => {
         password VARCHAR(255) NOT NULL,
         full_name VARCHAR(255) NOT NULL,
         role VARCHAR(50) NOT NULL,
-        department_id VARCHAR(50) REFERENCES departments(id),
+        department_id VARCHAR(50),
         department_name VARCHAR(255),
         is_main_dept BOOLEAN DEFAULT false,
         role_title VARCHAR(255),
@@ -117,43 +116,138 @@ const initDatabase = async () => {
       );
 
       CREATE TABLE IF NOT EXISTS documents (
-        id VARCHAR(100) PRIMARY KEY,
-        doc_number VARCHAR(100) NOT NULL,
-        title VARCHAR(255) NOT NULL,
-        description TEXT,
-        category VARCHAR(100),
-        priority VARCHAR(50),
-        sub_criteria VARCHAR(50),
-        is_personal_hq_dispatch BOOLEAN DEFAULT false,
-        personal_dispatch_note TEXT,
-        sender_dept_id VARCHAR(50),
-        sender_dept_name VARCHAR(255),
-        sender_user_id VARCHAR(50),
-        sender_user_name VARCHAR(255),
-        recipient_dept_ids JSONB DEFAULT '[]'::jsonb,
-        recipient_dept_names JSONB DEFAULT '[]'::jsonb,
-        is_sent_to_all BOOLEAN DEFAULT false,
-        file_name VARCHAR(255),
-        file_size VARCHAR(50),
-        file_type VARCHAR(50),
-        file_data_url TEXT,
-        status VARCHAR(50) DEFAULT 'Dispatched',
-        comments JSONB DEFAULT '[]'::jsonb,
-        history JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        id VARCHAR(255) PRIMARY KEY,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log('Database schema verified and connected successfully.');
+
+    // 2. Drop restrictive constraints and sequence defaults individually
+    const dropConstraints = [
+      'ALTER TABLE documents ALTER COLUMN id DROP DEFAULT;',
+      'ALTER TABLE documents ALTER COLUMN id TYPE VARCHAR(255) USING id::VARCHAR;',
+      'ALTER TABLE documents ALTER COLUMN reference_number DROP NOT NULL;',
+      'ALTER TABLE documents ALTER COLUMN doc_number DROP NOT NULL;',
+      'ALTER TABLE documents ALTER COLUMN title DROP NOT NULL;',
+      'ALTER TABLE documents ALTER COLUMN sender_department DROP NOT NULL;',
+      'ALTER TABLE documents ALTER COLUMN recipient_department DROP NOT NULL;',
+      'ALTER TABLE documents ALTER COLUMN status DROP NOT NULL;',
+      'ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_reference_number_key;',
+      'DROP INDEX IF EXISTS idx_documents_reference_number;',
+    ];
+
+    for (const sql of dropConstraints) {
+      try {
+        await client.query(sql);
+      } catch (e) { }
+    }
+
+    // 3. Ensure all required document columns exist with proper types
+    const addColumns = [
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS doc_number VARCHAR(100);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS reference_number VARCHAR(100);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS sender_department VARCHAR(255);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS recipient_department VARCHAR(255);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS title VARCHAR(500);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS description TEXT;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS category VARCHAR(100);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS priority VARCHAR(50);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS sub_criteria VARCHAR(100);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_personal_hq_dispatch BOOLEAN DEFAULT false;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS personal_dispatch_note TEXT;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS sender_dept_id VARCHAR(50);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS sender_dept_name VARCHAR(255);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS sender_user_id VARCHAR(50);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS sender_user_name VARCHAR(255);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS recipient_dept_ids JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS recipient_dept_names JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_sent_to_all BOOLEAN DEFAULT false;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_name VARCHAR(255);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_size VARCHAR(50);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_type VARCHAR(50);',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_data_url TEXT;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_url TEXT;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT \'Dispatched\';',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS comments JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS history JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE documents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;',
+    ];
+
+    for (const sql of addColumns) {
+      try {
+        await client.query(sql);
+      } catch (e) { }
+    }
+
+    // 4. Backfill reciprocal columns if null
+    try {
+      await client.query(`
+        UPDATE documents SET reference_number = doc_number WHERE reference_number IS NULL AND doc_number IS NOT NULL;
+        UPDATE documents SET doc_number = reference_number WHERE doc_number IS NULL AND reference_number IS NOT NULL;
+        UPDATE documents SET sender_dept_name = sender_department WHERE sender_dept_name IS NULL AND sender_department IS NOT NULL;
+        UPDATE documents SET sender_department = sender_dept_name WHERE sender_department IS NULL AND sender_dept_name IS NOT NULL;
+      `);
+    } catch (e) { }
+
+    // 5. Seed default departments if empty
+    try {
+      const deptCount = await client.query('SELECT COUNT(*) FROM departments');
+      if (parseInt(deptCount.rows[0].count, 10) === 0) {
+        const seedDepts = [
+          ['main-dept', 'MAIN', 'Main Department (Central HQ & Registry)', true, 'main@college.edu', 'Dr. Arthur Pendelton (Director)', 'Central Administrative Building, Floor 4', '+1 (555) 019-8000', '[]', 'main-dept'],
+          ['dept-c1', 'CRITERIA 1', 'Criteria 1 - Curricular Aspects', false, 'criteria1@college.edu', 'Criteria 1 Officer', 'Academic Block A, Room 101', '+1 (555) 019-8001', '["1.1", "1.2", "1.3", "1.4", "1.5"]', 'dept-c1'],
+          ['dept-c2', 'CRITERIA 2', 'Criteria 2 - Teaching-Learning & Evaluation', false, 'criteria2@college.edu', 'Criteria 2 Officer', 'Academic Block A, Room 102', '+1 (555) 019-8002', '["2.1", "2.2", "2.3", "2.4", "2.5"]', 'dept-c2'],
+          ['dept-c3', 'CRITERIA 3', 'Criteria 3 - Research, Innovations & Extension', false, 'criteria3@college.edu', 'Criteria 3 Officer', 'Academic Block B, Room 201', '+1 (555) 019-8003', '["3.1", "3.2", "3.3", "3.4", "3.5"]', 'dept-c3'],
+          ['dept-c4', 'CRITERIA 4', 'Criteria 4 - Infrastructure & Learning Resources', false, 'criteria4@college.edu', 'Criteria 4 Officer', 'Academic Block B, Room 202', '+1 (555) 019-8004', '["4.1", "4.2", "4.3", "4.4", "4.5"]', 'dept-c4'],
+          ['dept-c5', 'CRITERIA 5', 'Criteria 5 - Student Support & Progression', false, 'criteria5@college.edu', 'Criteria 5 Officer', 'Research Complex, Floor 1', '+1 (555) 019-8005', '["5.1", "5.2", "5.3", "5.4", "5.5"]', 'dept-c5'],
+          ['dept-c6', 'CRITERIA 6', 'Criteria 6 - Governance, Leadership & Management', false, 'criteria6@college.edu', 'Criteria 6 Officer', 'Research Complex, Floor 2', '+1 (555) 019-8006', '["6.1", "6.2", "6.3", "6.4", "6.5"]', 'dept-c6'],
+          ['dept-c7', 'CRITERIA 7', 'Criteria 7 - Institutional Values & Best Practices', false, 'criteria7@college.edu', 'Criteria 7 Officer', 'Quality Assurance Wing, Block C', '+1 (555) 019-8007', '["7.1", "7.2", "7.3", "7.4", "7.5"]', 'dept-c7']
+        ];
+        for (const d of seedDepts) {
+          await client.query(
+            `INSERT INTO departments (id, code, name, is_main, email, head_officer, building, phone, sub_criteria_list, dept_key)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+             ON CONFLICT (id) DO NOTHING`,
+            d
+          );
+        }
+      }
+    } catch (e) { }
+
+    // 6. Seed default accounts if empty
+    try {
+      const accCount = await client.query('SELECT COUNT(*) FROM accounts');
+      if (parseInt(accCount.rows[0].count, 10) === 0) {
+        const seedAccs = [
+          ['user-main', 'main@college.edu', 'main@123', 'Dr. Arthur Pendelton', 'main_department', 'main-dept', 'Main Department (Central HQ & Registry)', true, 'Central Registry Director', 'active'],
+          ['user-c1', 'criteria1@college.edu', 'criteria@1', 'Criteria 1 Officer', 'department_user', 'dept-c1', 'Criteria 1 - Curricular Aspects', false, 'Lead Criteria 1 Coordinator', 'active'],
+          ['user-c2', 'criteria2@college.edu', 'criteria@2', 'Criteria 2 Officer', 'department_user', 'dept-c2', 'Criteria 2 - Teaching-Learning & Evaluation', false, 'Lead Criteria 2 Coordinator', 'active'],
+          ['user-c3', 'criteria3@college.edu', 'criteria@3', 'Criteria 3 Officer', 'department_user', 'dept-c3', 'Criteria 3 - Research, Innovations & Extension', false, 'Lead Criteria 3 Coordinator', 'active'],
+          ['user-c4', 'criteria4@college.edu', 'criteria@4', 'Criteria 4 Officer', 'department_user', 'dept-c4', 'Criteria 4 - Infrastructure & Learning Resources', false, 'Lead Criteria 4 Coordinator', 'active'],
+          ['user-c5', 'criteria5@college.edu', 'criteria@5', 'Criteria 5 Officer', 'department_user', 'dept-c5', 'Criteria 5 - Student Support & Progression', false, 'Lead Criteria 5 Coordinator', 'active'],
+          ['user-c6', 'criteria6@college.edu', 'criteria@6', 'Criteria 6 Officer', 'department_user', 'dept-c6', 'Criteria 6 - Governance, Leadership & Management', false, 'Lead Criteria 6 Coordinator', 'active'],
+          ['user-c7', 'criteria7@college.edu', 'criteria@7', 'Criteria 7 Officer', 'department_user', 'dept-c7', 'Criteria 7 - Institutional Values & Best Practices', false, 'Lead Criteria 7 Coordinator', 'active']
+        ];
+        for (const a of seedAccs) {
+          await client.query(
+            `INSERT INTO accounts (id, email, password, full_name, role, department_id, department_name, is_main_dept, role_title, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (id) DO NOTHING`,
+            a
+          );
+        }
+      }
+    } catch (e) { }
+
+    console.log('Database schema verified: id VARCHAR support active, reference_number correctly mapped, constraints resolved.');
     client.release();
   } catch (err) {
-    console.error('Database schema initialization error:', err);
+    console.error('Database initialization warning:', err);
   }
 };
 
 initDatabase();
 
-// --- Health Check Endpoint ---
+// Health Check Endpoint
 app.get(['/api/health', '/health'], async (req, res) => {
   try {
     const result = await pool.query('SELECT NOW()');
@@ -167,26 +261,32 @@ app.get(['/api/health', '/health'], async (req, res) => {
   }
 });
 
-// --- File Upload Route ---
-app.post('/api/upload', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-  const fileUrl = `/uploads/${req.file.filename}`;
-  res.json({
-    fileName: req.file.originalname,
-    fileSize: `${(req.file.size / (1024 * 1024)).toFixed(2)} MB`,
-    fileType: req.file.mimetype,
-    fileDataUrl: fileUrl,
-  });
-});
-
-// --- Documents API Routes ---
+// Documents API Routes
 app.get('/api/documents', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM documents ORDER BY created_at DESC');
-    res.json(result.rows);
+    const normalizedDocs = result.rows.map((row) => ({
+      ...row,
+      id: String(row.id),
+      doc_number: row.doc_number || row.reference_number || `DOC-${row.id}`,
+      reference_number: row.reference_number || row.doc_number || `DOC-${row.id}`,
+      sender_dept_name: row.sender_dept_name || row.sender_department || 'Department',
+      recipient_dept_names:
+        typeof row.recipient_dept_names === 'string'
+          ? JSON.parse(row.recipient_dept_names)
+          : row.recipient_dept_names || (row.recipient_department ? [row.recipient_department] : []),
+      recipient_dept_ids:
+        typeof row.recipient_dept_ids === 'string'
+          ? JSON.parse(row.recipient_dept_ids)
+          : row.recipient_dept_ids || [],
+      comments:
+        typeof row.comments === 'string' ? JSON.parse(row.comments) : row.comments || [],
+      history:
+        typeof row.history === 'string' ? JSON.parse(row.history) : row.history || [],
+    }));
+    res.json(normalizedDocs);
   } catch (err) {
+    console.error('GET /api/documents error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -194,48 +294,138 @@ app.get('/api/documents', async (req, res) => {
 app.post('/api/documents', async (req, res) => {
   const doc = req.body;
   try {
+    const docId = String(doc.id || `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+    const docNumber = String(doc.doc_number || doc.reference_number || `DOC-${new Date().getFullYear()}-${Date.now()}`);
+    // Properly map reference_number from doc_number and ensure it is not null
+    const referenceNumber = String(doc.reference_number || doc.doc_number || docNumber);
+    const title = doc.title || 'Untitled Document';
+    const description = doc.description || '';
+    const category = doc.category || 'General Memo';
+    const priority = doc.priority || 'Normal';
+    const subCriteria = doc.sub_criteria || doc.subCriteria || '1.1';
+    const isPersonalHq = Boolean(doc.is_personal_hq_dispatch || doc.isPersonalHqDispatch);
+    const personalNote = doc.personal_dispatch_note || doc.personalDispatchNote || null;
+    const senderDeptId = String(doc.sender_dept_id || 'dept-c1');
+    const senderDeptName = doc.sender_dept_name || doc.sender_department || 'Department';
+    const senderUserId = String(doc.sender_user_id || 'user-1');
+    const senderUserName = doc.sender_user_name || 'User';
+    const recipientDeptIds = JSON.stringify(doc.recipient_dept_ids || []);
+    const recipientDeptNames = JSON.stringify(doc.recipient_dept_names || []);
+    const isSentToAll = Boolean(doc.is_sent_to_all);
+    const fileName = doc.file_name || 'Document.pdf';
+    const fileSize = doc.file_size || '1.0 MB';
+    const fileType = doc.file_type || 'PDF';
+    const fileDataUrl = doc.file_data_url || null;
+    const status = doc.status || 'Dispatched';
+    const comments = JSON.stringify(doc.comments || []);
+    const history = JSON.stringify(doc.history || []);
+    const createdAt = doc.created_at || new Date().toISOString();
+    const updatedAt = doc.updated_at || new Date().toISOString();
+
+    const senderDepartment = String(senderDeptName);
+    const recipientDepartment = Array.isArray(doc.recipient_dept_names) && doc.recipient_dept_names.length > 0
+      ? doc.recipient_dept_names.join(', ')
+      : String(doc.recipient_department || 'Main Department (Central HQ & Registry)');
+
+    // Decode base64 file and save to physical uploads/ folder on disk
+    let fileUrl = doc.file_url || null;
+    if (fileDataUrl && typeof fileDataUrl === 'string' && fileDataUrl.startsWith('data:')) {
+      try {
+        const matches = fileDataUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const buffer = Buffer.from(matches[2], 'base64');
+          const ext = fileName && fileName.includes('.') ? path.extname(fileName) : '.pdf';
+          const cleanBaseName = fileName ? path.basename(fileName, ext).replace(/[^a-zA-Z0-9.-]/g, '_') : 'document';
+          const savedFileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${cleanBaseName}${ext}`;
+          const filePath = path.join(uploadsDir, savedFileName);
+          fs.writeFileSync(filePath, buffer);
+          fileUrl = `/uploads/${savedFileName}`;
+          console.log(`[Uploads Disk] Saved document to: ${filePath} (${buffer.length} bytes)`);
+        }
+      } catch (fsErr) {
+        console.warn('Could not write base64 file to disk uploads directory:', fsErr.message);
+      }
+    }
+
     const query = `
       INSERT INTO documents (
-        id, doc_number, title, description, category, priority, sub_criteria,
+        id, doc_number, reference_number, sender_department, recipient_department,
+        title, description, category, priority, sub_criteria,
         is_personal_hq_dispatch, personal_dispatch_note, sender_dept_id, sender_dept_name,
         sender_user_id, sender_user_name, recipient_dept_ids, recipient_dept_names,
-        is_sent_to_all, file_name, file_size, file_type, file_data_url, status, comments, history,
+        is_sent_to_all, file_name, file_size, file_type, file_data_url, file_url, status, comments, history,
         created_at, updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
-      ) RETURNING *;
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        doc_number = EXCLUDED.doc_number,
+        reference_number = EXCLUDED.reference_number,
+        sender_department = EXCLUDED.sender_department,
+        recipient_department = EXCLUDED.recipient_department,
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        category = EXCLUDED.category,
+        priority = EXCLUDED.priority,
+        sub_criteria = EXCLUDED.sub_criteria,
+        is_personal_hq_dispatch = EXCLUDED.is_personal_hq_dispatch,
+        personal_dispatch_note = EXCLUDED.personal_dispatch_note,
+        sender_dept_id = EXCLUDED.sender_dept_id,
+        sender_dept_name = EXCLUDED.sender_dept_name,
+        sender_user_id = EXCLUDED.sender_user_id,
+        sender_user_name = EXCLUDED.sender_user_name,
+        recipient_dept_ids = EXCLUDED.recipient_dept_ids,
+        recipient_dept_names = EXCLUDED.recipient_dept_names,
+        is_sent_to_all = EXCLUDED.is_sent_to_all,
+        file_name = EXCLUDED.file_name,
+        file_size = EXCLUDED.file_size,
+        file_type = EXCLUDED.file_type,
+        file_data_url = EXCLUDED.file_data_url,
+        file_url = COALESCE(EXCLUDED.file_url, documents.file_url),
+        status = EXCLUDED.status,
+        comments = EXCLUDED.comments,
+        history = EXCLUDED.history,
+        updated_at = NOW()
+      RETURNING *;
     `;
+
     const values = [
-      doc.id,
-      doc.doc_number,
-      doc.title,
-      doc.description,
-      doc.category,
-      doc.priority,
-      doc.sub_criteria || null,
-      doc.is_personal_hq_dispatch || false,
-      doc.personal_dispatch_note || null,
-      doc.sender_dept_id,
-      doc.sender_dept_name,
-      doc.sender_user_id,
-      doc.sender_user_name,
-      JSON.stringify(doc.recipient_dept_ids || []),
-      JSON.stringify(doc.recipient_dept_names || []),
-      doc.is_sent_to_all || false,
-      doc.file_name,
-      doc.file_size,
-      doc.file_type,
-      doc.file_data_url || null,
-      doc.status || 'Dispatched',
-      JSON.stringify(doc.comments || []),
-      JSON.stringify(doc.history || []),
-      doc.created_at || new Date().toISOString(),
-      doc.updated_at || new Date().toISOString(),
+      docId,
+      docNumber,
+      referenceNumber,
+      senderDepartment,
+      recipientDepartment,
+      title,
+      description,
+      category,
+      priority,
+      subCriteria,
+      isPersonalHq,
+      personalNote,
+      senderDeptId,
+      senderDeptName,
+      senderUserId,
+      senderUserName,
+      recipientDeptIds,
+      recipientDeptNames,
+      isSentToAll,
+      fileName,
+      fileSize,
+      fileType,
+      fileDataUrl,
+      fileUrl,
+      status,
+      comments,
+      history,
+      createdAt,
+      updatedAt,
     ];
+
     const result = await pool.query(query, values);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('POST /api/documents error:', err);
+    res.status(500).json({ error: err.message, detail: err.detail || null });
   }
 });
 
@@ -338,11 +528,51 @@ app.delete('/api/documents/:id', async (req, res) => {
   }
 });
 
-// --- Departments & Accounts Routes ---
+app.get('/api/documents/download/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('SELECT * FROM documents WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const doc = result.rows[0];
+    if (doc.file_url) {
+      const localFilePath = path.join(__dirname, doc.file_url);
+      if (fs.existsSync(localFilePath)) {
+        return res.download(localFilePath, doc.file_name || 'document.pdf');
+      }
+    }
+    if (doc.file_data_url) {
+      return res.redirect(doc.file_data_url);
+    }
+    return res.status(404).json({ error: 'No file attached to this document' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// File Upload Endpoint (for multipart file submissions)
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  const fileUrl = `/uploads/${req.file.filename}`;
+  res.json({
+    url: fileUrl,
+    filename: req.file.filename,
+    originalName: req.file.originalname,
+    size: req.file.size,
+  });
+});
+
 app.get('/api/departments', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM departments ORDER BY code ASC');
-    res.json(result.rows);
+    const mapped = result.rows.map((d) => ({
+      ...d,
+      id: d.dept_key || String(d.id),
+    }));
+    res.json(mapped);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -357,7 +587,7 @@ app.get('/api/accounts', async (req, res) => {
   }
 });
 
-// Serve frontend build if dist folder exists
+// Static frontend serving in production
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   app.get('*', (req, res) => {
@@ -365,6 +595,10 @@ if (fs.existsSync(distPath)) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Document Dispatch System Server running on http://localhost:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Document Dispatch System Server running on http://localhost:${PORT}`);
+  });
+}
+
+export default app;

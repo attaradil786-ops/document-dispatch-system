@@ -70,6 +70,7 @@ export interface DocumentHistoryEvent {
 export interface DocumentItem {
   id: string;
   doc_number: string; // e.g. 'DOC-2026-MAIN-001'
+  reference_number?: string;
   title: string;
   description: string;
   category: DocumentCategory;
