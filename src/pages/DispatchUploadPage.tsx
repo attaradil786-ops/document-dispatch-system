@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { storageService } from '../services/storageService';
 import { DocumentCategory, DocumentPriority } from '../types';
@@ -40,41 +40,76 @@ interface AttachedFileItem {
 
 export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSuccess }) => {
   const { user, isMainDept, departmentName } = useAuth();
-  const subDepts = storageService.getSubDepartments();
+
+  // Safe retrieval of sub-departments with array fallback
+  const subDepts = useMemo(() => {
+    try {
+      const depts = storageService.getSubDepartments();
+      return Array.isArray(depts) ? depts : [];
+    } catch {
+      return [];
+    }
+  }, []);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<DocumentCategory>('Work Report');
   const [priority, setPriority] = useState<DocumentPriority>('Normal');
 
-  // Get allowed sub-criteria strictly for user's department
-  const allowedSubCriteria = getSubCriteriaForDepartment(user?.department_id, isMainDept);
-  const userCriteriaNum = getCriteriaNumberFromDeptId(user?.department_id);
-
-  // Selected Sub-Criteria Codes state array (allows single or multiple codes like ['1.2', '1.5', '4.3', '5.5'])
-  const [selectedSubCriteriaCodes, setSelectedSubCriteriaCodes] = useState<string[]>([
-    allowedSubCriteria[0]?.code || '1.1',
-  ]);
-
-  // Derived subCriteria string representation (e.g. "1.2, 1.5, 4.3, 5.5")
-  const subCriteria = selectedSubCriteriaCodes.length > 0 ? selectedSubCriteriaCodes.join(', ') : '1.1';
-
-  // Ensure selectedSubCriteriaCodes state stays within allowed range if user department shifts
-  useEffect(() => {
-    if (allowedSubCriteria.length > 0) {
-      const valid = selectedSubCriteriaCodes.filter((code) =>
-        allowedSubCriteria.some((sc) => sc.code === code)
-      );
-      if (valid.length === 0) {
-        setSelectedSubCriteriaCodes([allowedSubCriteria[0].code]);
-      } else if (valid.length !== selectedSubCriteriaCodes.length) {
-        setSelectedSubCriteriaCodes(valid);
-      }
+  // Safe sub-criteria retrieval
+  const allowedSubCriteria = useMemo(() => {
+    try {
+      const list = getSubCriteriaForDepartment(user?.department_id, isMainDept);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return Array.isArray(ALL_SUB_CRITERIA) ? ALL_SUB_CRITERIA : [];
     }
   }, [user?.department_id, isMainDept]);
 
+  const userCriteriaNum = getCriteriaNumberFromDeptId(user?.department_id);
+
+  // Selected Sub-Criteria Codes state array
+  const [selectedSubCriteriaCodes, setSelectedSubCriteriaCodes] = useState<string[]>(() => {
+    const defaultCode = allowedSubCriteria[0]?.code;
+    return typeof defaultCode === 'string' ? [defaultCode] : ['1.1'];
+  });
+
+  // Derived subCriteria string representation
+  const subCriteria = useMemo(() => {
+    if (!Array.isArray(selectedSubCriteriaCodes) || selectedSubCriteriaCodes.length === 0) {
+      return '1.1';
+    }
+    return selectedSubCriteriaCodes
+      .filter((c) => typeof c === 'string' || typeof c === 'number')
+      .map(String)
+      .join(', ');
+  }, [selectedSubCriteriaCodes]);
+
+  // Ensure selectedSubCriteriaCodes state stays within allowed range
+  useEffect(() => {
+    if (Array.isArray(allowedSubCriteria) && allowedSubCriteria.length > 0) {
+      const valid = selectedSubCriteriaCodes.filter((code) =>
+        allowedSubCriteria.some((sc) => String(sc?.code) === String(code))
+      );
+      if (valid.length === 0 && allowedSubCriteria[0]?.code) {
+        setSelectedSubCriteriaCodes([String(allowedSubCriteria[0].code)]);
+      } else if (valid.length !== selectedSubCriteriaCodes.length) {
+        setSelectedSubCriteriaCodes(valid.map(String));
+      }
+    }
+  }, [user?.department_id, isMainDept, allowedSubCriteria]);
+
+  // If Main Dept: selected sub-dept IDs or 'all'
+  // If Sub Dept: locked to ['main-dept']
+  const [selectedTargets, setSelectedTargets] = useState<string[]>(
+    isMainDept ? ['all'] : ['main-dept']
+  );
+
   // Toggle or update multi sub-criteria
-  const handleToggleSubCriteria = (code: string) => {
+  const handleToggleSubCriteria = (codeRaw: any) => {
+    const code = String(codeRaw || '');
+    if (!code) return;
+
     let updated: string[];
     if (selectedSubCriteriaCodes.includes(code)) {
       if (selectedSubCriteriaCodes.length === 1) return; // Keep at least 1 selected
@@ -88,7 +123,7 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
       const targetDepts = Array.from(
         new Set(
           updated
-            .map((c) => parseInt(c.split('.')[0], 10))
+            .map((c) => parseInt(String(c).split('.')[0], 10))
             .filter((n) => !isNaN(n))
             .map((n) => `dept-c${n}`)
         )
@@ -97,15 +132,16 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
     }
   };
 
-  const handleSetSubCriteriaCodes = (codes: string[]) => {
-    if (codes.length === 0) return;
+  const handleSetSubCriteriaCodes = (codesRaw: any[]) => {
+    if (!Array.isArray(codesRaw) || codesRaw.length === 0) return;
+    const codes = codesRaw.map(String);
     setSelectedSubCriteriaCodes(codes);
 
     if (isMainDept) {
       const targetDepts = Array.from(
         new Set(
           codes
-            .map((c) => parseInt(c.split('.')[0], 10))
+            .map((c) => parseInt(String(c).split('.')[0], 10))
             .filter((n) => !isNaN(n))
             .map((n) => `dept-c${n}`)
         )
@@ -114,13 +150,7 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
     }
   };
 
-  // If Main Dept: selected sub-dept IDs or 'all'
-  // If Sub Dept: locked to ['main-dept']
-  const [selectedTargets, setSelectedTargets] = useState<string[]>(
-    isMainDept ? ['all'] : ['main-dept']
-  );
-
-  // Personal HQ Dispatch mode state (Main Dept personal upload to sub-criteria branches)
+  // Personal HQ Dispatch mode state
   const [isPersonalHqDispatch, setIsPersonalHqDispatch] = useState<boolean>(false);
   const [personalDispatchNote, setPersonalDispatchNote] = useState<string>('');
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
@@ -129,10 +159,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
   const openDrawerForCriteria = (critNum: number | 'all') => {
     setDrawerCriteriaNum(critNum);
     setIsDrawerOpen(true);
-  };
-
-  const handlePersonalSubCriteriaChange = (code: string) => {
-    handleToggleSubCriteria(code);
   };
 
   // Multiple attached files state
@@ -147,7 +173,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
     const filesArray: File[] = Array.from(e.target.files);
     setUploadError('');
 
-    // Auto-fill title from first attached file if title is currently empty
     if (!title.trim() && filesArray.length > 0) {
       const cleanName = filesArray[0].name
         .replace(/\.[^/.]+$/, '')
@@ -157,7 +182,7 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
         setTitle(cleanName);
       }
     }
-    
+
     filesArray.forEach((selectedFile: File) => {
       const fileSizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2) + ' MB';
       const fileName = selectedFile.name;
@@ -181,7 +206,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
       reader.readAsDataURL(selectedFile);
     });
 
-    // Reset input value so same files can be chosen again if needed
     e.target.value = '';
   };
 
@@ -190,7 +214,7 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
   };
 
   const toggleTarget = (deptId: string) => {
-    if (!isMainDept) return; // Sub-departments cannot change target
+    if (!isMainDept) return;
 
     if (deptId === 'all') {
       setSelectedTargets(['all']);
@@ -234,7 +258,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
     setTimeout(() => {
       try {
         if (attachedFiles.length > 0) {
-          // Multi-file dispatch: Create 1 document per attached file
           attachedFiles.forEach((fileItem, index) => {
             const docTitle =
               attachedFiles.length === 1
@@ -249,7 +272,8 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                 priority,
                 subCriteria,
                 isPersonalHqDispatch: isMainDept ? isPersonalHqDispatch : false,
-                personalDispatchNote: isMainDept && isPersonalHqDispatch ? personalDispatchNote.trim() : undefined,
+                personalDispatchNote:
+                  isMainDept && isPersonalHqDispatch ? personalDispatchNote.trim() : undefined,
                 targetDeptIds: selectedTargets,
                 fileName: fileItem.name,
                 fileSize: fileItem.sizeMb,
@@ -262,12 +286,10 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
 
           setIsSubmitting(false);
           setSuccessMsg(
-            `Successfully uploaded and dispatched ${attachedFiles.length} ${
-              attachedFiles.length === 1 ? 'document' : 'documents'
+            `Successfully uploaded and dispatched ${attachedFiles.length} ${attachedFiles.length === 1 ? 'document' : 'documents'
             } simultaneously!`
           );
         } else {
-          // Fallback single document dispatch
           const fileSizeMb = '1.2 MB';
           const fileName = `${effectiveTitle.replace(/\s+/g, '_')}.pdf`;
           const fileType = 'PDF';
@@ -280,7 +302,8 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
               priority,
               subCriteria,
               isPersonalHqDispatch: isMainDept ? isPersonalHqDispatch : false,
-              personalDispatchNote: isMainDept && isPersonalHqDispatch ? personalDispatchNote.trim() : undefined,
+              personalDispatchNote:
+                isMainDept && isPersonalHqDispatch ? personalDispatchNote.trim() : undefined,
               targetDeptIds: selectedTargets,
               fileName,
               fileSize: fileSizeMb,
@@ -327,14 +350,14 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
       </div>
 
       {uploadError && (
-        <div className="flex items-center gap-3 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 p-4 text-rose-800 dark:text-rose-200 font-bold text-xs animate-in zoom-in-95">
+        <div className="flex items-center gap-3 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 p-4 text-rose-800 dark:text-rose-200 font-bold text-xs">
           <AlertCircle className="h-5 w-5 text-rose-600 shrink-0" />
           <span>{uploadError}</span>
         </div>
       )}
 
       {successMsg && (
-        <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 p-4 text-emerald-800 dark:text-emerald-200 font-bold text-xs animate-in zoom-in-95">
+        <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 p-4 text-emerald-800 dark:text-emerald-200 font-bold text-xs">
           <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
           <span>{successMsg}</span>
         </div>
@@ -357,7 +380,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
               )}
             </label>
 
-            {/* Sub-Department Enforcement Callout */}
             {!isMainDept ? (
               <div className="space-y-4">
                 <div className="rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/40 p-4 flex items-start gap-3">
@@ -367,7 +389,7 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                       Target: Main Department (Central HQ & Registry)
                     </p>
                     <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
-                      Sub-departments (like {departmentName}) upload documents strictly to the Main Department. Direct cross-department transmissions are restricted to prevent data leakage.
+                      Sub-departments (like {departmentName || 'your department'}) upload documents strictly to the Main Department. Direct cross-department transmissions are restricted to prevent data leakage.
                     </p>
                   </div>
                 </div>
@@ -394,48 +416,44 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                     Select which sub-criteria node(s) this document is associated with before dispatching:
                   </p>
 
-                  {/* Quick Select Buttons for Department's Sub-Criteria */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {allowedSubCriteria.map((sc) => {
-                      const isSelected = selectedSubCriteriaCodes.includes(sc.code);
+                      const scCodeStr = String(sc?.code || '');
+                      const isSelected = selectedSubCriteriaCodes.includes(scCodeStr);
                       return (
                         <button
-                          key={sc.code}
+                          key={scCodeStr}
                           type="button"
-                          onClick={() => handleToggleSubCriteria(sc.code)}
-                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 shadow-xs ${
-                            isSelected
-                              ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-400 scale-[1.01]'
-                              : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700'
-                          }`}
+                          onClick={() => handleToggleSubCriteria(scCodeStr)}
+                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 shadow-xs ${isSelected
+                            ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-400 scale-[1.01]'
+                            : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700'
+                            }`}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
                               <span
-                                className={`font-mono text-xs font-black px-2 py-0.5 rounded-md ${
-                                  isSelected
-                                    ? 'bg-purple-900 text-white'
-                                    : 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200'
-                                }`}
+                                className={`font-mono text-xs font-black px-2 py-0.5 rounded-md ${isSelected
+                                  ? 'bg-purple-900 text-white'
+                                  : 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200'
+                                  }`}
                               >
-                                Criteria {sc.code}
+                                Criteria {scCodeStr}
                               </span>
                             </div>
                             <p
-                              className={`text-xs font-bold mt-1 truncate ${
-                                isSelected ? 'text-white' : 'text-slate-700 dark:text-slate-300'
-                              }`}
+                              className={`text-xs font-bold mt-1 truncate ${isSelected ? 'text-white' : 'text-slate-700 dark:text-slate-300'
+                                }`}
                             >
-                              {sc.title}
+                              {sc?.title || ''}
                             </p>
                           </div>
 
                           <div
-                            className={`h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${
-                              isSelected
-                                ? 'bg-purple-900 border-purple-900 text-white'
-                                : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800'
-                            }`}
+                            className={`h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${isSelected
+                              ? 'bg-purple-900 border-purple-900 text-white'
+                              : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800'
+                              }`}
                           >
                             {isSelected && <CheckCircle2 className="h-3.5 w-3.5 stroke-[3]" />}
                           </div>
@@ -444,7 +462,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                     })}
                   </div>
 
-                  {/* Summary of Selected Sub-Criteria */}
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-900 flex items-center justify-between text-xs font-bold">
                     <span className="text-slate-500 font-medium">Document Sub-Criteria Code:</span>
                     <span className="font-extrabold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950 px-2.5 py-1 rounded-md font-mono">
@@ -454,7 +471,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                 </div>
               </div>
             ) : (
-              /* Main Dept Choice & Mode Toggle */
               <div className="space-y-3">
                 <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60">
                   <button
@@ -463,11 +479,10 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                       setIsPersonalHqDispatch(false);
                       setSelectedTargets(['all']);
                     }}
-                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                      !isPersonalHqDispatch
-                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs border border-slate-200 dark:border-slate-800'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                    }`}
+                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${!isPersonalHqDispatch
+                      ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs border border-slate-200 dark:border-slate-800'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
                   >
                     <Building2 className="h-4 w-4" />
                     <span>Standard Broadcast / Multi-Dept Target</span>
@@ -477,13 +492,12 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                     type="button"
                     onClick={() => {
                       setIsPersonalHqDispatch(true);
-                      handlePersonalSubCriteriaChange(subCriteria);
+                      handleToggleSubCriteria(selectedSubCriteriaCodes[0] || '1.1');
                     }}
-                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-2 cursor-pointer ${
-                      isPersonalHqDispatch
-                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-2 ring-purple-400 dark:ring-purple-500/80 scale-[1.01]'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-purple-600 dark:hover:text-purple-300 hover:bg-purple-50/60 dark:hover:bg-purple-950/30'
-                    }`}
+                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-2 cursor-pointer ${isPersonalHqDispatch
+                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-2 ring-purple-400 dark:ring-purple-500/80 scale-[1.01]'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-purple-600 dark:hover:text-purple-300 hover:bg-purple-50/60 dark:hover:bg-purple-950/30'
+                      }`}
                   >
                     <div className="flex items-center gap-2">
                       <ShieldCheck className="h-4 w-4 shrink-0 text-purple-200" />
@@ -496,7 +510,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                 </div>
 
                 {isPersonalHqDispatch ? (
-                  /* Personal HQ Dispatch Box */
                   <div className="space-y-4 p-4 rounded-2xl border border-purple-200 dark:border-purple-900/60 bg-purple-50/70 dark:bg-purple-950/40 shadow-xs">
                     <div className="flex items-start gap-3">
                       <ShieldCheck className="h-5 w-5 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
@@ -510,7 +523,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                       </div>
                     </div>
 
-                    {/* Interactive Sub-Criteria Selection via Criteria Drawer Buttons & Multi-Select Pills */}
                     <div className="space-y-3 pt-1 border-t border-purple-200/60 dark:border-purple-900/40">
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -523,7 +535,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                         </span>
                       </div>
 
-                      {/* Active Selected Sub-Criteria Badges / Tags */}
                       <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-900/60 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
@@ -538,19 +549,19 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {selectedSubCriteriaCodes.map((code) => {
-                            const scObj = ALL_SUB_CRITERIA.find((s) => s.code === code);
+                            const codeStr = String(code);
                             return (
                               <span
-                                key={code}
+                                key={codeStr}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-purple-600 text-white shadow-xs"
                               >
-                                <span>Criteria {code}</span>
+                                <span>Criteria {codeStr}</span>
                                 {selectedSubCriteriaCodes.length > 1 && (
                                   <button
                                     type="button"
-                                    onClick={() => handleToggleSubCriteria(code)}
+                                    onClick={() => handleToggleSubCriteria(codeStr)}
                                     className="hover:bg-purple-800 rounded-md p-0.5 transition-colors cursor-pointer"
-                                    title={`Remove ${code}`}
+                                    title={`Remove ${codeStr}`}
                                   >
                                     <X className="h-3 w-3" />
                                   </button>
@@ -561,28 +572,27 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                         </div>
                       </div>
 
-                      {/* Criteria Select Buttons with specific drawer triggers */}
                       <div className="space-y-2">
                         {[1, 2, 3, 4, 5, 6, 7].map((critNum) => {
-                          const groupItems = ALL_SUB_CRITERIA.filter((sc) => sc.criteriaNumber === critNum);
+                          const groupItems = Array.isArray(ALL_SUB_CRITERIA)
+                            ? ALL_SUB_CRITERIA.filter((sc) => sc?.criteriaNumber === critNum)
+                            : [];
                           const minCode = groupItems[0]?.code || `${critNum}.1`;
                           const maxCode = groupItems[groupItems.length - 1]?.code || `${critNum}.5`;
                           const selectedInGroup = selectedSubCriteriaCodes.filter((c) =>
-                            c.startsWith(`${critNum}.`)
+                            String(c).startsWith(`${critNum}.`)
                           );
                           const hasSelectedInGroup = selectedInGroup.length > 0;
 
                           return (
                             <div key={critNum} className="flex items-center gap-2 flex-wrap">
-                              {/* Dedicated Criteria Select Button that opens drawer for this specific criteria */}
                               <button
                                 type="button"
                                 onClick={() => openDrawerForCriteria(critNum)}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 border shadow-xs ${
-                                  hasSelectedInGroup
-                                    ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-400 scale-[1.01]'
-                                    : 'bg-purple-100/90 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200 border-purple-300 dark:border-purple-800 hover:bg-purple-200 dark:hover:bg-purple-900'
-                                }`}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 border shadow-xs ${hasSelectedInGroup
+                                  ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-400 scale-[1.01]'
+                                  : 'bg-purple-100/90 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200 border-purple-300 dark:border-purple-800 hover:bg-purple-200 dark:hover:bg-purple-900'
+                                  }`}
                               >
                                 <Tag className="h-3.5 w-3.5 shrink-0" />
                                 <span>Criteria {critNum} ({minCode} - {maxCode})</span>
@@ -596,23 +606,22 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                                 </span>
                               </button>
 
-                              {/* Quick sub-criteria pills for multi-toggle */}
                               <div className="flex items-center gap-1 flex-wrap">
                                 {groupItems.map((sc) => {
-                                  const isCurrent = selectedSubCriteriaCodes.includes(sc.code);
+                                  const scCodeStr = String(sc?.code || '');
+                                  const isCurrent = selectedSubCriteriaCodes.includes(scCodeStr);
                                   return (
                                     <button
-                                      key={sc.code}
+                                      key={scCodeStr}
                                       type="button"
-                                      onClick={() => handleToggleSubCriteria(sc.code)}
-                                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                                        isCurrent
-                                          ? 'bg-purple-900 text-white shadow-xs font-black ring-1 ring-purple-400'
-                                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-purple-200 dark:border-purple-900/60 hover:bg-purple-100 dark:hover:bg-purple-950'
-                                      }`}
-                                      title={`Toggle Sub-Criteria ${sc.code}: ${sc.title}`}
+                                      onClick={() => handleToggleSubCriteria(scCodeStr)}
+                                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${isCurrent
+                                        ? 'bg-purple-900 text-white shadow-xs font-black ring-1 ring-purple-400'
+                                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-purple-200 dark:border-purple-900/60 hover:bg-purple-100 dark:hover:bg-purple-950'
+                                        }`}
+                                      title={`Toggle Sub-Criteria ${scCodeStr}: ${sc?.title || ''}`}
                                     >
-                                      <span>{sc.code}</span>
+                                      <span>{scCodeStr}</span>
                                       {isCurrent ? (
                                         <CheckCircle2 className="h-3 w-3 text-white shrink-0" />
                                       ) : (
@@ -628,7 +637,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                       </div>
                     </div>
 
-                    {/* Automated Department Routing & Multi-Criteria Preview */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                       <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
@@ -652,7 +660,7 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                           <span className="truncate">
                             Routes to:{' '}
                             {Array.from(
-                              new Set(selectedSubCriteriaCodes.map((c) => c.split('.')[0]))
+                              new Set(selectedSubCriteriaCodes.map((c) => String(c).split('.')[0]))
                             )
                               .map((c) => `Criteria ${c}`)
                               .join(', ')}
@@ -679,7 +687,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                     </div>
                   </div>
                 ) : (
-                  /* Standard Broadcast Grid */
                   <div className="space-y-2">
                     <p className="text-xs text-slate-500">
                       Select sub-departments to dispatch this document to, or broadcast to all departments:
@@ -688,11 +695,10 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                       <button
                         type="button"
                         onClick={() => toggleTarget('all')}
-                        className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-between transition-all ${
-                          selectedTargets.includes('all')
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-md'
-                            : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
-                        }`}
+                        className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-between transition-all ${selectedTargets.includes('all')
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                          : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
+                          }`}
                       >
                         <span>📢 ALL Sub-Departments</span>
                         {selectedTargets.includes('all') && <CheckCircle2 className="h-4 w-4 text-white" />}
@@ -707,11 +713,10 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                             key={d.id}
                             type="button"
                             onClick={() => toggleTarget(d.id)}
-                            className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
-                              isSelected
-                                ? 'bg-blue-600 text-white border-blue-600 shadow-md'
-                                : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 hover:border-blue-300 dark:hover:border-blue-700'
-                            }`}
+                            className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${isSelected
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                              : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 hover:border-blue-300 dark:hover:border-blue-700'
+                              }`}
                           >
                             <div className="flex flex-col items-start gap-0.5 min-w-0">
                               <span className="truncate font-bold">{d.name}</span>
@@ -781,15 +786,14 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
                     key={p}
                     type="button"
                     onClick={() => setPriority(p)}
-                    className={`p-3 rounded-2xl border text-xs font-bold transition-all text-center ${
-                      isSelected
-                        ? p === 'Urgent'
-                          ? 'bg-rose-600 text-white border-rose-600 shadow-md'
-                          : p === 'Confidential'
+                    className={`p-3 rounded-2xl border text-xs font-bold transition-all text-center ${isSelected
+                      ? p === 'Urgent'
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-md'
+                        : p === 'Confidential'
                           ? 'bg-amber-600 text-white border-amber-600 shadow-md'
                           : 'bg-blue-600 text-white border-blue-600 shadow-md'
-                        : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
-                    }`}
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
+                      }`}
                   >
                     {p === 'Urgent' && '🔥 '}
                     {p === 'Confidential' && '🔒 '}
@@ -828,7 +832,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
               )}
             </div>
 
-            {/* Drag & Drop Input Zone */}
             <div className="relative border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center bg-slate-50/50 dark:bg-slate-800/30 hover:border-blue-500 transition-colors cursor-pointer group">
               <input
                 type="file"
@@ -852,7 +855,6 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
               </div>
             </div>
 
-            {/* List of Attached Files */}
             {attachedFiles.length > 0 && (
               <div className="space-y-2 pt-1">
                 <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -906,8 +908,8 @@ export const DispatchUploadPage: React.FC<DispatchUploadPageProps> = ({ onSucces
               {isSubmitting
                 ? 'Uploading & Transmitting...'
                 : attachedFiles.length > 1
-                ? `Dispatch ${attachedFiles.length} Documents`
-                : 'Dispatch Document'}
+                  ? `Dispatch ${attachedFiles.length} Documents`
+                  : 'Dispatch Document'}
             </span>
           </button>
         </div>
