@@ -3,6 +3,7 @@ import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { ToastContainer } from '../common/ToastContainer';
 import { Menu, Database } from 'lucide-react';
+import { storageService } from '../../services/storageService';
 
 interface MainLayoutProps {
   activeTab: string;
@@ -22,7 +23,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dbStatus, setDbStatus] = useState<{ connected: boolean; database?: string }>({
-    connected: true,
+    connected: false,
     database: 'dispatch_db',
   });
 
@@ -30,11 +31,21 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     let isMounted = true;
 
     const checkDatabaseHealth = async () => {
+      // 1. Sync immediately with StorageService connection state if available
+      if (storageService.isCloudConnected()) {
+        if (isMounted) {
+          setDbStatus({
+            connected: true,
+            database: 'PostgreSQL',
+          });
+        }
+      }
+
       const endpoint = API_BASE ? `${API_BASE}/api/health` : '/api/health';
       try {
         const res = await fetch(endpoint, {
           headers: {
-            Accept: 'application/json',
+            'Content-Type': 'application/json',
             'ngrok-skip-browser-warning': 'true',
           },
           cache: 'no-store',
@@ -54,68 +65,30 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
                 connected: true,
                 database: data.database || data.db_name || 'PostgreSQL',
               });
-            } else {
-              setDbStatus({ connected: false });
-            }
-          }
-        } else {
-          // Fallback probe
-          const fallbackEndpoint = API_BASE ? `${API_BASE}/api/db-status` : '/api/db-status';
-          const fallbackRes = await fetch(fallbackEndpoint, {
-            headers: {
-              'ngrok-skip-browser-warning': 'true',
-            },
-            cache: 'no-store',
-          });
-          if (fallbackRes.ok) {
-            const fallbackData = await fallbackRes.json();
-            if (isMounted && (fallbackData?.status === 'connected' || fallbackData?.connected)) {
-              setDbStatus({ connected: true, database: fallbackData.database || 'PostgreSQL' });
               return;
             }
           }
-          if (isMounted) setDbStatus({ connected: false });
         }
       } catch (err) {
-        // Fallback retry with relative endpoint if cross-origin failed
-        try {
-          const fallbackRes = await fetch('/api/health', {
-            headers: {
-              'ngrok-skip-browser-warning': 'true',
-            },
-            cache: 'no-store',
-          });
-          if (fallbackRes.ok) {
-            const fallbackData = await fallbackRes.json();
-            if (
-              isMounted &&
-              (fallbackData.status === 'online' ||
-                fallbackData.status === 'connected' ||
-                fallbackData.database === 'connected' ||
-                fallbackData.connected ||
-                fallbackData.ok)
-            ) {
-              setDbStatus({ connected: true, database: fallbackData.database || 'PostgreSQL' });
-              return;
-            }
-          }
-        } catch {
-          // Both failed
-        }
-        if (isMounted) {
-          setDbStatus({ connected: false });
-        }
+        // Fallback probe
+      }
+
+      // Check fallback via storage service state
+      if (isMounted) {
+        setDbStatus({
+          connected: storageService.isCloudConnected(),
+          database: 'PostgreSQL',
+        });
       }
     };
 
-    // Initial check immediately
     checkDatabaseHealth();
-
-    // Regular polling every 5 seconds
-    const interval = setInterval(checkDatabaseHealth, 5000);
+    const unsubscribe = storageService.subscribe(checkDatabaseHealth);
+    const interval = setInterval(checkDatabaseHealth, 4000);
 
     return () => {
       isMounted = false;
+      unsubscribe();
       clearInterval(interval);
     };
   }, []);
