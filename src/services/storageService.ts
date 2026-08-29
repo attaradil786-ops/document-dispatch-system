@@ -295,7 +295,11 @@ class StorageService {
   private async fetchRemoteData() {
     try {
       // 1. Fetch Documents
-      const docRes = await fetch(`${API_BASE_URL}/api/documents`);
+      const docRes = await fetch(`${API_BASE_URL}/api/documents`, {
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
       if (docRes.ok) {
         const remoteDocs: any[] = await docRes.json();
         const normalizedDocs: DocumentItem[] = remoteDocs.map((d) => ({
@@ -312,7 +316,11 @@ class StorageService {
       }
 
       // 2. Fetch Departments
-      const deptRes = await fetch(`${API_BASE_URL}/api/departments`);
+      const deptRes = await fetch(`${API_BASE_URL}/api/departments`, {
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
       if (deptRes.ok) {
         const remoteDepts: Department[] = await deptRes.json();
         if (remoteDepts.length > 0) {
@@ -322,7 +330,11 @@ class StorageService {
       }
 
       // 3. Fetch Accounts
-      const accRes = await fetch(`${API_BASE_URL}/api/accounts`);
+      const accRes = await fetch(`${API_BASE_URL}/api/accounts`, {
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
       if (accRes.ok) {
         const remoteAccs: UserAccount[] = await accRes.json();
         if (remoteAccs.length > 0) {
@@ -514,7 +526,10 @@ class StorageService {
     // 2. Persist to PostgreSQL via REST API
     fetch(`${API_BASE_URL}/api/documents`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: JSON.stringify(newDoc),
     })
       .then((res) => res.json())
@@ -573,7 +588,10 @@ class StorageService {
     // Persist status to PostgreSQL API
     fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: JSON.stringify({
         status: newStatus,
         remark,
@@ -613,7 +631,10 @@ class StorageService {
     // Persist comment to PostgreSQL API
     fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/comments`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: JSON.stringify({
         message,
         author_name: user.full_name,
@@ -636,6 +657,9 @@ class StorageService {
 
     fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}`, {
       method: 'DELETE',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
     })
       .then(() => this.fetchRemoteData())
       .catch((err) => console.warn('Delete sync notice:', err));
@@ -736,8 +760,8 @@ class StorageService {
     }));
   }
 
-  public markNotificationRead(_id: string) {}
-  public markAllNotificationsRead() {}
+  public markNotificationRead(_id: string) { }
+  public markAllNotificationsRead() { }
 }
 
 export const storageService = new StorageService();
